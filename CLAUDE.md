@@ -34,7 +34,7 @@ Pre-commit hook (`.githooks/pre-commit`, wired via `core.hooksPath`) auto-fixes 
 - **Independence via seams:** a pillar depends on `AideCore` protocols + mocks, never another pillar's concrete implementation. Real implementations swap in with no change to consumers.
 - **The Xcode project is generated:** edit `project.yml`, then `just gen`. Never hand-edit `Aide.xcodeproj` (gitignored).
 - **Local-first by default:** honor the privacy invariants in `docs/03-architecture.md` §10.1 — nothing leaves the machine implicitly.
-- **Phases run one at a time** with user review between; don't batch (see each plan's execution notes).
+- **Phased execution follows `/execute-plan`:** independent phases run in parallel batches, dependent phases in order (per the plan's dependency analysis); pause for user review after each batch.
 
 ## Cross-Cutting Docs
 

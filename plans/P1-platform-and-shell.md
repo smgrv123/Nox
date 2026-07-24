@@ -199,6 +199,6 @@ A one-click "Wipe all history" in Settings that clears transcripts, command hist
 
 ## Execution notes
 
-- Phases are implemented **one at a time**; do not batch them.
-- After each phase, pause for user review; apply feedback; proceed only on approval.
+- Independent phases run in **parallel batches**; dependent phases run in order (see the dependency analysis produced at execution time).
+- After each **batch**, pause for user review; apply feedback; proceed only on approval.
 - Debug/temporary triggers introduced in early phases (e.g. Phase 4's state-forcing menu items) are removed or gated once the real driver (Phase 6) and onboarding (Phase 10) exercise those paths.
