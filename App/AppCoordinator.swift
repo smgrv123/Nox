@@ -47,6 +47,13 @@ final class AppCoordinator: ObservableObject {
     /// Settings Permissions pane) reuse this same gate.
     private let permissionGate = PermissionGate(read: SystemPermissionReader().liveStatus)
 
+    /// The separate, focus-taking confirmation window (PHASE 11; docs/04-hld.md
+    /// §13.3). Distinct from the non-activating overlay — see `ConfirmationModal`.
+    private let confirmationModal = ConfirmationModal()
+
+    /// Sleep/wake observer tokens (PHASE 11; User Story 37), torn down in `deinit`.
+    private var sleepWakeObservers: [NSObjectProtocol] = []
+
     /// The resolved Application Support layout and its plain-text log, populated on
     /// first launch (User Stories 33, 35). Later P1 phases (settings, history, wipe)
     /// read their paths from `storage`.
@@ -97,6 +104,32 @@ final class AppCoordinator: ObservableObject {
             Task { @MainActor in self?.accessibilityFixIt = advice }
         }
         hotkeys.start()
+        installSleepWakeObserver()
+    }
+
+    /// Observe system sleep/wake so the app resumes in a sane state (PHASE 11; User
+    /// Stories 37, 38). Both edges are recorded to `app.log` (a human-readable state,
+    /// never silence); on wake the hotkey tap — which macOS can disable across sleep —
+    /// is re-asserted so Push-to-Talk keeps working. Notifications arrive on `.main`.
+    private func installSleepWakeObserver() {
+        let center = NSWorkspace.shared.notificationCenter
+        let sleep = center.addObserver(
+            forName: NSWorkspace.willSleepNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.appLog?.log("System is going to sleep.", level: .notice)
+        }
+        let wake = center.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.appLog?.log("System woke from sleep — revalidating hotkey capture.", level: .notice)
+            self?.hotkeys.revalidate()
+        }
+        sleepWakeObservers = [sleep, wake]
+    }
+
+    deinit {
+        let center = NSWorkspace.shared.notificationCenter
+        for observer in sleepWakeObservers { center.removeObserver(observer) }
     }
 
     /// Create the Application Support tree (idempotent — only what's missing) and
@@ -186,6 +219,42 @@ final class AppCoordinator: ObservableObject {
             hotkeys.retry()
         } else {
             accessibilityFixIt = permissionGate.advice(for: .accessibility)
+        }
+    }
+
+    // MARK: - Wipe all history (PHASE 11; User Story 34)
+
+    /// Ask the user to confirm a history wipe, routed through the focus-taking
+    /// `ConfirmationModal` (the real trigger that also exercises the modal infra).
+    /// Nothing is deleted until the user takes the deliberate destructive action.
+    func requestWipeAllHistory() {
+        let content = ConfirmationModal.Content(
+            title: "Wipe all history?",
+            message:
+                "This permanently deletes your transcripts, command history, and script logs. "
+                + "Your settings, scripts, and dictionary are kept.",
+            confirmTitle: "Wipe History")
+        confirmationModal.present(content) { [weak self] in
+            self?.performWipe()
+        }
+    }
+
+    /// Run the scoped wipe against the resolved storage tree and surface the outcome
+    /// as a human-readable status + `app.log` line (User Story 38 — never silent).
+    /// The *scope* (what's deleted vs preserved) is the tested `HistoryWipe` policy.
+    private func performWipe() {
+        guard let storage else {
+            appLog?.log("Wipe requested but storage is unavailable.", level: .error)
+            statusText = "Couldn't wipe history — storage unavailable"
+            return
+        }
+        do {
+            let removed = try HistoryWipe(layout: storage).perform()
+            appLog?.log("Wiped history: removed \(removed.count) file(s).", level: .notice)
+            statusText = "History wiped (\(removed.count) file\(removed.count == 1 ? "" : "s"))"
+        } catch {
+            appLog?.log("Wipe failed: \(error.localizedDescription)", level: .error)
+            statusText = "Couldn't wipe history — see app.log"
         }
     }
 }

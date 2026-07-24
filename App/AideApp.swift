@@ -17,9 +17,10 @@ struct AideApp: App {
         }
         .menuBarExtraStyle(.menu)
 
-        // Empty for now — the Settings framework + P1 panes land in later phases.
+        // Settings framework + P1 panes land in later phases; PHASE 11 wires the
+        // coordinator through so the "Wipe all history" pane can trigger the wipe.
         Settings {
-            SettingsView()
+            SettingsView(coordinator: appDelegate.coordinator)
         }
     }
 }

@@ -81,6 +81,24 @@ final class HotkeyManager {
         onAccessibilityStatus?(nil)
     }
 
+    /// Re-assert the event tap after a system event that can silently disable it —
+    /// notably sleep/wake (PHASE 11; User Story 37). macOS may disable a tap across
+    /// sleep; re-enabling it keeps Push-to-Talk working so the app resumes usable
+    /// rather than going quietly dead. No tap installed → surface the (unchanged)
+    /// Accessibility-needed state instead of failing silently (User Story 38).
+    func revalidate() {
+        guard let tap = eventTap else {
+            logger.notice("Wake revalidation: no event tap installed (Accessibility not granted?).")
+            onStatusChange?("⚠️ Needs Accessibility permission")
+            return
+        }
+        if !CGEvent.tapIsEnabled(tap: tap) {
+            CGEvent.tapEnable(tap: tap, enable: true)
+            logger.notice("Re-enabled the Push-to-Talk event tap after wake.")
+        }
+        onStatusChange?("Ready — hold F13 to test")
+    }
+
     private func handle(type: CGEventType, event: CGEvent) {
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
         guard keyCode == Self.pushToTalkKeyCode else { return }
