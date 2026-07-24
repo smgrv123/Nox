@@ -1,25 +1,23 @@
 import AppKit
-import os
 
-/// Owns the app-lifetime singletons (currently just the hotkey tap).
-final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
-    private let hotkeys = HotkeyManager()
+/// Thin `NSApplicationDelegate` adapter. It owns no lifecycle state itself —
+/// every launch hook is forwarded to `AppCoordinator`, the single lifecycle owner
+/// (specs/P1 §"AppCoordinator"). It exists only because `MenuBarExtra` needs an
+/// app-delegate seam for the launch hooks plus a stable object the menubar view
+/// can observe.
+final class AppDelegate: NSObject, NSApplicationDelegate {
 
-    /// Human-readable hotkey state surfaced in the menubar menu.
-    @Published var hotkeyStatus: String = "Starting…"
+    /// The lifecycle owner. Created eagerly so it exists before the first scene
+    /// build — the menubar menu observes `coordinator.statusText`.
+    let coordinator = AppCoordinator()
 
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        hotkeys.onStatusChange = { [weak self] status in
-            Task { @MainActor in self?.hotkeyStatus = status }
-        }
-        hotkeys.start()
+    /// Single-instance enforcement runs here (earliest hook) so a duplicate stands
+    /// down before it can register a second menubar item or hotkey tap.
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        coordinator.applicationWillFinishLaunching()
     }
 
-    /// Deep-link to the exact System Settings pane for the Accessibility grant.
-    /// (Onboarding will drive this per docs/04-hld.md §14; exposed here for the tracer bullet.)
-    static func openAccessibilitySettings() {
-        let url = URL(
-            string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
-        NSWorkspace.shared.open(url)
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        coordinator.applicationDidFinishLaunching()
     }
 }

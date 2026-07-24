@@ -24,7 +24,13 @@ targets:
       - package: AideModules
         product: AideCore
       - package: AideModules
+        product: AppLifecycle
+      - package: AideModules
         product: DangerousCommandScanner
+      - package: AideModules
+        product: Persistence
+      - package: AideModules
+        product: Configuration
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.aide.Aide

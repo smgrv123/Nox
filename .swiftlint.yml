@@ -26,6 +26,13 @@ identifier_name:
   min_length: 2       # allow short names like `rx`, `id`
   excluded: [id, rx, ok, to]
 
+# Allow a nested type two deep: a nested Codable struct legitimately owns its own
+# `CodingKeys` (e.g. Settings.Indicators.CodingKeys). The settings model grows more
+# nested blocks per phase, so this pattern recurs — relaxed deliberately rather than
+# flattening idiomatic code or disabling the rule per-file.
+nesting:
+  type_level: 2
+
 opt_in_rules:
   - empty_count
   - empty_string
