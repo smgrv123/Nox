@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+      Aide runs NON-sandboxed in v1 (no com.apple.security.app-sandbox key):
+      Accessibility text insertion, spawning the llama-server sidecar, and running
+      user-approved scripts are incompatible with the App Sandbox.
+      See docs/05-lld.md §8 (Permissions & Entitlements) — marked [ASSUMPTION] there,
+      ratified here for v1. Hardened Runtime stays ON (ENABLE_HARDENED_RUNTIME in project.yml)
+      so notarization remains a later settings flip.
+    -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+</dict>
+</plist>

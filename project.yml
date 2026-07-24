@@ -1,0 +1,45 @@
+name: Aide
+
+# XcodeGen spec — THIS file is the source of truth and is committed.
+# The generated Aide.xcodeproj is gitignored; run `xcodegen generate` after edits.
+# (Locked decision #3: XcodeGen + local SwiftPM modules.)
+
+options:
+  bundleIdPrefix: com.aide
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+
+packages:
+  AideModules:
+    path: .
+
+targets:
+  Aide:
+    type: application
+    platform: macOS
+    sources:
+      - path: App
+    dependencies:
+      - package: AideModules
+        product: AideCore
+      - package: AideModules
+        product: DangerousCommandScanner
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.aide.Aide
+        PRODUCT_NAME: Aide
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.9"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        # Menubar-only: no Dock icon.
+        INFOPLIST_KEY_LSUIElement: YES
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_NSHumanReadableCopyright: ""
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: "Aide transcribes your voice locally on this Mac. Audio never leaves the machine."
+        # Signing / notarization posture (locked decision #2): hardened runtime ON from day one.
+        ENABLE_HARDENED_RUNTIME: YES
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_ENTITLEMENTS: App/Aide.entitlements
+        # DEVELOPMENT_TEAM is intentionally unset — set your Team in Xcode once enrolled.

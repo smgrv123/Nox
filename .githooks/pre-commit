@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Aide pre-commit hook — the Husky + lint-staged analog (auto-fix on commit).
+#
+# On STAGED .swift files: swift-format --in-place + swiftlint --fix, re-stage the
+# fixes, then a strict lint pass blocks the commit only on issues auto-fix can't
+# resolve. Mirrors the reference repo's lint-staged (eslint --fix + prettier --write).
+# Wired via `git config core.hooksPath .githooks`.
+#
+# Note: like a simplified lint-staged, this re-stages whole files — if a file has
+# both staged and unstaged hunks, the unstaged hunks get included in the commit.
+set -euo pipefail
+
+# Read staged .swift files into an array (bash 3.2-compatible — macOS has no `mapfile`).
+staged=()
+while IFS= read -r file; do
+    [ -n "$file" ] && staged+=("$file")
+done < <(git diff --cached --name-only --diff-filter=ACM -- '*.swift')
+
+if [ ${#staged[@]} -eq 0 ]; then
+    exit 0
+fi
+
+echo "▶ swift-format (auto-fix, ${#staged[@]} file(s))"
+swift format format --in-place "${staged[@]}"
+
+echo "▶ swiftlint --fix"
+swiftlint lint --fix --quiet "${staged[@]}" >/dev/null
+
+echo "▶ re-stage fixes"
+git add "${staged[@]}"
+
+echo "▶ swiftlint (strict verify)"
+if ! swiftlint lint --strict --quiet "${staged[@]}"; then
+    echo "❌ pre-commit: lint issues remain that auto-fix couldn't resolve — fix them and re-commit."
+    exit 1
+fi
+
+echo "✅ pre-commit passed"

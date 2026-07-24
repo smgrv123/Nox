@@ -1,0 +1,41 @@
+# SwiftLint config — the ESLint analog. Formatting is owned by swift-format
+# (see .swift-format); SwiftLint here handles lint / correctness rules only.
+
+included:
+  - Sources
+  - App
+  - Tests
+
+excluded:
+  - .build
+  - Vendor
+  - Aide.xcodeproj
+  - budgetmybs
+
+# swift-format owns line length + comma style; keep SwiftLint from fighting it.
+disabled_rules:
+  - todo            # we intentionally keep TODO markers that reference the LLD
+  - trailing_comma  # swift-format enforces multi-element trailing commas
+
+line_length:
+  warning: 140      # lenient above swift-format's 120 so it never conflicts
+  error: 200
+  ignores_comments: true
+
+identifier_name:
+  min_length: 2       # allow short names like `rx`, `id`
+  excluded: [id, rx, ok, to]
+
+opt_in_rules:
+  - empty_count
+  - empty_string
+  - closure_spacing
+  - collection_alignment
+  - contains_over_first_not_nil
+  - first_where
+  - last_where
+  - sorted_first_last
+  - redundant_nil_coalescing
+  - toggle_bool
+
+reporter: "xcode"

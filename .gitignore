@@ -1,0 +1,27 @@
+# --- Xcode / XcodeGen ---
+# The .xcodeproj is generated from project.yml; never commit it.
+*.xcodeproj/
+*.xcworkspace/
+!default.xcworkspace
+DerivedData/
+build/
+
+# --- SwiftPM ---
+.build/
+.swiftpm/
+Package.resolved
+
+# --- macOS ---
+.DS_Store
+
+# --- Models & vendored binaries (downloaded / built, never committed) ---
+Vendor/models/
+Vendor/bin/
+*.gguf
+*.bin
+
+# --- Local secrets / dev config ---
+*.local.plist
+
+# --- Reference clone (not part of Aide) ---
+/budgetmybs/
