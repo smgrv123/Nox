@@ -1,4 +1,5 @@
 import AideCore
+import Overlay
 import SwiftUI
 
 /// The `MenuBarExtra` menu content (User Stories 3, 4): a thin SwiftUI shell that
@@ -34,6 +35,16 @@ struct MenubarMenu: View {
             isOn: Binding(
                 get: { coordinator.settings.indicators.audioCueOnListen },
                 set: { coordinator.setAudioCueOnListen($0) }))
+
+        // PHASE 4 (TEMPORARY debug triggers): force the Overlay through each state to
+        // verify its visuals + the non-activating (no focus-steal) panel now, before a
+        // driver exists. Phase 6's voice loop / Phase 10's onboarding replace these
+        // (mirrors the Phase 3 audio-cue debug toggle above). See plans/P1 Phase 4.
+        Menu("Overlay state (debug)") {
+            ForEach(OverlayState.allCases, id: \.self) { state in
+                Button(state.displayName) { coordinator.overlay.debugForce(state) }
+            }
+        }
 
         Divider()
 

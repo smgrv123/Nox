@@ -27,6 +27,12 @@ final class AppCoordinator: ObservableObject {
 
     private let hotkeys = HotkeyManager()
     private let singleInstance = SingleInstanceGuard()
+
+    /// The non-activating Overlay panel + its state machine (Phase 4; User Stories 5,
+    /// 6, 7, 10). `AppCoordinator` owns it; Phase 6 wires the hotkey → Overlay loop
+    /// through `overlay.send(_:)`. `internal` so the menubar's temporary debug items
+    /// can drive it (see `MenubarMenu`).
+    let overlay = OverlayController()
     private let logger = Logger(subsystem: Build.bundleIdentifier, category: "Lifecycle")
 
     /// The resolved Application Support layout and its plain-text log, populated on

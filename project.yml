@@ -31,6 +31,8 @@ targets:
         product: Persistence
       - package: AideModules
         product: Configuration
+      - package: AideModules
+        product: Overlay
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.aide.Aide

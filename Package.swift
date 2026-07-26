@@ -19,6 +19,7 @@ let package = Package(
         .library(name: "DangerousCommandScanner", targets: ["DangerousCommandScanner"]),
         .library(name: "Persistence", targets: ["Persistence"]),
         .library(name: "Configuration", targets: ["Configuration"]),
+        .library(name: "Overlay", targets: ["Overlay"]),
     ],
     targets: [
         .target(name: "AideCore"),
@@ -40,6 +41,11 @@ let package = Package(
             name: "Configuration",
             dependencies: ["Persistence"]
         ),
+        // Pure Overlay state machine (docs/04-hld.md §13.1): Hidden ↔ Listening ↔
+        // Processing ↔ ShowingResult / PromptBack / ConfirmBack, with illegal
+        // transitions guarded. No UI/I/O — the non-activating NSPanel that renders it
+        // is the thin shell in App/OverlayPanel.swift.
+        .target(name: "Overlay"),
         .testTarget(
             name: "AppLifecycleTests",
             dependencies: ["AppLifecycle"]
@@ -55,6 +61,10 @@ let package = Package(
         .testTarget(
             name: "ConfigurationTests",
             dependencies: ["Configuration"]
+        ),
+        .testTarget(
+            name: "OverlayTests",
+            dependencies: ["Overlay"]
         ),
     ]
 )
