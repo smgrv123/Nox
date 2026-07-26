@@ -18,9 +18,24 @@ struct MenubarMenu: View {
 
         Divider()
 
-        Button("Open Accessibility Settings…") {
-            AppCoordinator.openAccessibilitySettings()
+        // P7 fix-it (User Stories 15, 26): when the hotkey path is blocked by a missing
+        // Accessibility grant, PermissionGate supplies the hint + exact-pane deep-link.
+        // Shown only while the grant is missing; re-checking after granting clears it
+        // (recovery). SEAM: the Overlay (sibling phase) will surface this same fix-it via
+        // the coordinator's `accessibilityFixIt` API — nothing overlay-specific here.
+        if let fixIt = coordinator.accessibilityFixIt {
+            Text(fixIt.hint)
+                .font(.caption)
+                .foregroundStyle(.orange)
+            Button("Open \(fixIt.permission.displayName) Settings…") {
+                coordinator.openFixIt(fixIt)
+            }
+            Button("Re-check \(fixIt.permission.displayName)") {
+                coordinator.recheckAccessibility()
+            }
+            Divider()
         }
+
         SettingsLink {
             Text("Settings…")
         }

@@ -2,6 +2,7 @@ import AideCore
 import AppKit
 import AppLifecycle
 import Configuration
+import Permissions
 import Persistence
 import os
 
@@ -25,6 +26,11 @@ final class AppCoordinator: ObservableObject {
     /// so the UI is always safe to render.
     @Published private(set) var settings: Settings = .defaults
 
+    /// P7 (User Stories 15, 26): the persistent, actionable fix-it for the Accessibility
+    /// grant that the hotkey path needs. `nil` when granted (nothing to fix). The menubar
+    /// renders `hint` + a deep-link button; re-granting clears it (recovery).
+    @Published private(set) var accessibilityFixIt: PermissionAdvice?
+
     private let hotkeys = HotkeyManager()
     private let singleInstance = SingleInstanceGuard()
 
@@ -34,6 +40,12 @@ final class AppCoordinator: ObservableObject {
     /// can drive it (see `MenubarMenu`).
     let overlay = OverlayController()
     private let logger = Logger(subsystem: Build.bundleIdentifier, category: "Lifecycle")
+
+    /// Prompt-free permission detection for all four permissions (User Story 27). The
+    /// pure hint/deep-link/degradation logic lives in `PermissionGate`; the injected
+    /// `SystemPermissionReader` is the thin effectful TCC shell. Later phases (the
+    /// Settings Permissions pane) reuse this same gate.
+    private let permissionGate = PermissionGate(read: SystemPermissionReader().liveStatus)
 
     /// The resolved Application Support layout and its plain-text log, populated on
     /// first launch (User Stories 33, 35). Later P1 phases (settings, history, wipe)
@@ -78,6 +90,11 @@ final class AppCoordinator: ObservableObject {
         setUpStorage()
         hotkeys.onStatusChange = { [weak self] status in
             Task { @MainActor in self?.statusText = status }
+        }
+        // P7: surface (or clear) the Accessibility fix-it as the hotkey tap install
+        // succeeds/fails. Callback fires on the tap thread; hop to the main actor.
+        hotkeys.onAccessibilityStatus = { [weak self] advice in
+            Task { @MainActor in self?.accessibilityFixIt = advice }
         }
         hotkeys.start()
     }
@@ -148,12 +165,27 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
-    /// Deep-link to the exact System Settings pane for the Accessibility grant.
-    /// (Onboarding drives this properly in a later P1 phase — docs/04-hld.md §14;
-    /// surfaced here so the tracer-bullet hotkey status stays actionable.)
-    static func openAccessibilitySettings() {
-        let url = URL(
-            string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
-        NSWorkspace.shared.open(url)
+    // MARK: - Permission fix-it (P7; User Stories 15, 26, 27)
+
+    /// Open the exact System Settings pane carried by a fix-it (the deep-link comes from
+    /// `PermissionGate`, the single source of truth — docs/05-lld.md §8).
+    func openFixIt(_ advice: PermissionAdvice) {
+        NSWorkspace.shared.open(advice.deepLink)
+    }
+
+    /// Re-read the Accessibility grant **prompt-free** (User Story 27) after the user
+    /// returns from System Settings. If it's now granted, re-attempt the hotkey tap —
+    /// which installs it and clears the fix-it (recovery). Otherwise refresh the hint so
+    /// it stays visible and actionable.
+    ///
+    /// SEAM: the Overlay (a sibling phase, not in this worktree) will attach its own
+    /// fix-it affordance to the same `accessibilityFixIt` / `openFixIt` / `recheck` API —
+    /// no overlay code is referenced here so the phases stay independent.
+    func recheckAccessibility() {
+        if permissionGate.status(for: .accessibility).isUsable {
+            hotkeys.retry()
+        } else {
+            accessibilityFixIt = permissionGate.advice(for: .accessibility)
+        }
     }
 }

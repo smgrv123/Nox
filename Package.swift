@@ -20,6 +20,7 @@ let package = Package(
         .library(name: "Persistence", targets: ["Persistence"]),
         .library(name: "Configuration", targets: ["Configuration"]),
         .library(name: "Overlay", targets: ["Overlay"]),
+        .library(name: "Permissions", targets: ["Permissions"]),
     ],
     targets: [
         .target(name: "AideCore"),
@@ -46,6 +47,11 @@ let package = Package(
         // transitions guarded. No UI/I/O — the non-activating NSPanel that renders it
         // is the thin shell in App/OverlayPanel.swift.
         .target(name: "Overlay"),
+        // Prompt-free permission status detection (docs/05-lld.md §8): status → fix-it
+        // hint + System Settings deep-link, and the per-permission graceful-degradation
+        // map. Pure Foundation-only logic; the effectful TCC queries are a thin shell in
+        // the app target (App/SystemPermissionReader.swift).
+        .target(name: "Permissions"),
         .testTarget(
             name: "AppLifecycleTests",
             dependencies: ["AppLifecycle"]
@@ -65,6 +71,10 @@ let package = Package(
         .testTarget(
             name: "OverlayTests",
             dependencies: ["Overlay"]
+        ),
+        .testTarget(
+            name: "PermissionsTests",
+            dependencies: ["Permissions"]
         ),
     ]
 )

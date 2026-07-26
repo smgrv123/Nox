@@ -33,6 +33,9 @@ targets:
         product: Configuration
       - package: AideModules
         product: Overlay
+      # P7: prompt-free permission detection + graceful-degradation map (docs/05-lld.md §8).
+      - package: AideModules
+        product: Permissions
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.aide.Aide
