@@ -21,6 +21,7 @@ let package = Package(
         .library(name: "Configuration", targets: ["Configuration"]),
         .library(name: "Overlay", targets: ["Overlay"]),
         .library(name: "Permissions", targets: ["Permissions"]),
+        .library(name: "Hotkeys", targets: ["Hotkeys"]),
     ],
     targets: [
         .target(name: "AideCore"),
@@ -52,6 +53,16 @@ let package = Package(
         // map. Pure Foundation-only logic; the effectful TCC queries are a thin shell in
         // the app target (App/SystemPermissionReader.swift).
         .target(name: "Permissions"),
+        // Pure hotkey binding logic (docs/05-lld.md §2.5, §8, §10): maps the
+        // `Settings.hotkeys` bindings to internal chords and decides which semantic
+        // hotkey (command vs dictation) a raw key event is, and whether it is a
+        // push-to-talk down or up. No CGEventTap here — the tap install is the thin
+        // OS-bound shell in App/HotkeyManager.swift; this deep module is unit-tested
+        // headlessly from injected (keyCode, flags, phase) triples.
+        .target(
+            name: "Hotkeys",
+            dependencies: ["Configuration"]
+        ),
         .testTarget(
             name: "AppLifecycleTests",
             dependencies: ["AppLifecycle"]
@@ -75,6 +86,10 @@ let package = Package(
         .testTarget(
             name: "PermissionsTests",
             dependencies: ["Permissions"]
+        ),
+        .testTarget(
+            name: "HotkeysTests",
+            dependencies: ["Hotkeys"]
         ),
     ]
 )

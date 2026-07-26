@@ -23,10 +23,9 @@ struct SettingsMigration {
 /// The ordered migration chain and the walker that applies it.
 enum SettingsMigrator {
 
-    /// Steps in ascending order, one per version bump. A later phase that adds a
-    /// field (e.g. `hotkeys`, bumping to v2) appends a `from: 1, to: 2` step here —
-    /// nothing else changes. Computed (not stored) so the closures never become
-    /// shared global state.
+    /// Steps in ascending order, one per version bump. A phase that adds a field
+    /// appends the next `from: N, to: N+1` step here — nothing else changes. Computed
+    /// (not stored) so the closures never become shared global state.
     static var chain: [SettingsMigration] {
         [
             // v0 → v1. "v0" is the pre-envelope development layout: no `schema_version`
@@ -43,7 +42,24 @@ enum SettingsMigrator {
                 migrated.removeValue(forKey: "audio_cue")
                 migrated["schema_version"] = 1
                 return migrated
-            }
+            },
+            // v1 → v2 (Phase 5). v2 (LLD §2.5) adds the `hotkeys` block. A pre-v2 file
+            // has no hotkeys, so we write the spec defaults (⌥Space command, ⌃Space
+            // dictation, both push-to-talk). The user's `indicators` block is left
+            // untouched — this step only adds `hotkeys`, so no existing value is lost.
+            // (Canonical defaults live in `Settings.Hotkeys()`; mirrored here as raw
+            // JSON, matching the v0→v1 step's style.)
+            SettingsMigration(from: 1, to: 2) { v1 in
+                var migrated = v1
+                if migrated["hotkeys"] == nil {
+                    migrated["hotkeys"] = [
+                        "command_mode": ["key_code": 49, "modifiers": ["option"], "mode": "push_to_talk"],
+                        "dictation_mode": ["key_code": 49, "modifiers": ["control"], "mode": "push_to_talk"],
+                    ]
+                }
+                migrated["schema_version"] = 2
+                return migrated
+            },
         ]
     }
 

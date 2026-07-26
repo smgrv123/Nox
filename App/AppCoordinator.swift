@@ -2,6 +2,7 @@ import AideCore
 import AppKit
 import AppLifecycle
 import Configuration
+import Hotkeys
 import Permissions
 import Persistence
 import os
@@ -19,6 +20,11 @@ final class AppCoordinator: ObservableObject {
 
     /// Human-readable status surfaced in the menubar menu (User Stories 3, 10).
     @Published private(set) var statusText = "Starting…"
+
+    /// The last lifecycle status the hotkey tap reported — the text shown when no
+    /// hotkey is held. Cached so a hold's key-up restores it verbatim rather than
+    /// re-authoring a second, drift-prone copy of the "ready" string. Main-actor-only.
+    private var idleStatus = "Starting…"
 
     /// The loaded user preferences (docs/05-lld.md §2.5). Main-actor-owned state the
     /// menubar reads; mutated only through the setters below, which also persist.
@@ -95,16 +101,50 @@ final class AppCoordinator: ObservableObject {
     func applicationDidFinishLaunching() {
         guard !isDuplicateInstance else { return }
         setUpStorage()
-        hotkeys.onStatusChange = { [weak self] status in
-            Task { @MainActor in self?.statusText = status }
+        startHotkeys()
+        installSleepWakeObserver()
+    }
+
+    /// Install the global push-to-talk tap and route its two callbacks to the menubar
+    /// status. Called after `setUpStorage()` so the binder reflects the user's loaded
+    /// `settings.hotkeys`, not a placeholder (User Stories 11, 12). Both callbacks are
+    /// delivered on the main actor by `HotkeyManager`; the `Task { @MainActor }` hop
+    /// keeps the `@Published` mutation isolated and matches the rest of this type.
+    private func startHotkeys() {
+        hotkeys.onStatus = { [weak self] status in
+            Task { @MainActor in self?.showHotkeyStatus(status) }
         }
-        // P7: surface (or clear) the Accessibility fix-it as the hotkey tap install
-        // succeeds/fails. Callback fires on the tap thread; hop to the main actor.
+        hotkeys.onActivation = { [weak self] activation in
+            Task { @MainActor in self?.reflectHold(activation) }
+        }
+        // P7: surface (or clear) the Accessibility fix-it as the tap install
+        // succeeds/fails (User Stories 15, 26). Delivered on the main actor.
         hotkeys.onAccessibilityStatus = { [weak self] advice in
             Task { @MainActor in self?.accessibilityFixIt = advice }
         }
-        hotkeys.start()
-        installSleepWakeObserver()
+        hotkeys.start(binder: HotkeyBinder(hotkeys: settings.hotkeys))
+    }
+
+    /// A lifecycle status from the tap (installed-and-ready, or the Accessibility-denied
+    /// message — User Story 15). It doubles as the "idle" text a hold returns to, so it
+    /// is cached in `idleStatus`.
+    @MainActor
+    private func showHotkeyStatus(_ status: String) {
+        idleStatus = status
+        statusText = status
+    }
+
+    /// Reflect a push-to-talk hold in the menubar: down → a listening state that names
+    /// the mode (command vs dictation, so the two hotkeys are visibly distinguished —
+    /// User Story 12); up → back to the idle status (User Story 11).
+    @MainActor
+    private func reflectHold(_ activation: HotkeyActivation) {
+        switch activation.phase {
+        case .down:
+            statusText = "🎙️ Listening — \(activation.hotkey.displayName)"
+        case .up:
+            statusText = idleStatus
+        }
     }
 
     /// Observe system sleep/wake so the app resumes in a sane state (PHASE 11; User

@@ -36,6 +36,9 @@ targets:
       # P7: prompt-free permission detection + graceful-degradation map (docs/05-lld.md §8).
       - package: AideModules
         product: Permissions
+      # P5: pure hotkey binding logic behind App/HotkeyManager.swift.
+      - package: AideModules
+        product: Hotkeys
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.aide.Aide

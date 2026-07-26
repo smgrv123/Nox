@@ -79,7 +79,7 @@ final class SettingsStoreTests: XCTestCase {
         try store.save(store.load())
 
         let text = try XCTUnwrap(String(data: try Data(contentsOf: settingsURL), encoding: .utf8))
-        XCTAssertTrue(text.contains("\"schema_version\" : 1"))
+        XCTAssertTrue(text.contains("\"schema_version\" : 2"), "rewritten file carries the current schema version")
         XCTAssertFalse(text.contains("\"audio_cue\""), "legacy flat key should be gone")
         XCTAssertTrue(text.contains("\"audio_cue_on_listen\" : false"), "migrated value must survive the rewrite")
     }

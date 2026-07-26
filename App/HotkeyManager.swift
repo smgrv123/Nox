@@ -1,47 +1,72 @@
 import AppKit
 import CoreGraphics
+import Hotkeys
 import Permissions
 import os
 
-/// Global Push-to-Talk hotkey capture via `CGEventTap` (locked decision #4).
+/// Global push-to-talk hotkey capture via `CGEventTap` (locked decision #4).
 ///
-/// A session event tap is the mechanism used by comparable dictation tools: it
-/// yields clean keyDown/keyUp pairs (needed to know when the user starts and stops
-/// holding) and can bind modifier-only keys. It requires the **Accessibility**
+/// A session event tap is the mechanism used by comparable dictation tools: it yields
+/// clean keyDown/keyUp pairs (needed to know when the user starts and stops holding)
+/// and sees events from any foreground app. It requires the **Accessibility**
 /// permission — which Aide needs anyway for Text Insertion — so there is no extra
-/// permission cost (see docs/04-hld.md §13, docs/05-lld.md §8).
+/// permission cost (docs/04-hld.md §13, docs/05-lld.md §8).
 ///
-/// Tracer-bullet scope: install the tap, report success/failure (so a missing
-/// permission is legible, not silent), and log keyDown/keyUp of a placeholder
-/// Push-to-Talk key. Real hotkey binding + audio capture arrive with the STT
-/// subsystem (docs/04-hld.md §3).
+/// This shell is deliberately thin: it installs the tap and forwards raw events to the
+/// pure `HotkeyBinder` (the tested "settings → chords" + "event → semantic hotkey"
+/// logic in the `Hotkeys` module). Concurrency rules it MUST honour (docs/05-lld.md
+/// §10): the tap callback returns immediately, and all reaction to an event — the
+/// binder lookup, the tiny held-hotkey state, and the UI-facing callbacks — happens on
+/// the **main actor**.
 final class HotkeyManager {
 
-    /// Placeholder Push-to-Talk keycode: F13 (0x69). Real binding is user-configurable later.
-    private static let pushToTalkKeyCode: Int64 = 0x69
+    /// The idle/ready status shown when no hotkey is held (single source so `start`
+    /// and `revalidate` never drift).
+    private static let readyStatus = "Ready — hold a hotkey to talk"
+    /// The actionable Accessibility-denied message (User Story 15): never fail silently.
+    private static let accessibilityNeededStatus =
+        "⚠️ Hotkeys need Accessibility access. Open the menu → “Open Accessibility Settings…”, "
+        + "enable Aide, then relaunch."
 
     private let logger = Logger(subsystem: "com.aide.Aide", category: "Hotkey")
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
 
-    /// Called on the main actor with a short status string for the menubar UI.
-    var onStatusChange: ((String) -> Void)?
+    /// The chords to match against, derived from `Settings.hotkeys`. Set by `start`;
+    /// read only on the main actor.
+    private var binder: HotkeyBinder?
+
+    /// The hotkey currently held down (push-to-talk). Main-actor-only state; lets us
+    /// end the hold reliably even if the base key's modifier is released a hair before
+    /// the key itself (so the tap reports the keyUp without the modifier bit).
+    private var activeHotkey: SemanticHotkey?
+
+    /// Semantic push-to-talk edge, delivered on the main actor. Later phases hook the
+    /// real voice session here; today `AppCoordinator` turns it into menubar status.
+    var onActivation: ((HotkeyActivation) -> Void)?
+
+    /// Lifecycle / error status (installed, or Accessibility-denied), on the main actor.
+    var onStatus: ((String) -> Void)?
 
     /// P7 fix-it seam (User Stories 15, 26): reports the Accessibility grant state of the
     /// hotkey path. `nil` means the tap installed (granted / recovered); a non-nil
     /// `PermissionAdvice` carries the hint + exact-pane deep-link for the menubar (and,
-    /// later, the overlay) to render instead of failing silently. Called on the tap thread;
-    /// the app hops it to the main actor.
+    /// later, the overlay) to render instead of failing silently. Called on the main actor.
     var onAccessibilityStatus: ((PermissionAdvice?) -> Void)?
 
     /// Re-attempt the tap install (P7 recovery): after the user grants Accessibility in
-    /// System Settings, this installs the tap and clears the fix-it. Idempotent — a no-op
-    /// once the tap is already live.
+    /// System Settings, this re-runs `start` with the binder already in hand, installing
+    /// the tap and clearing the fix-it. A no-op if `start` was never called or the tap is
+    /// already live.
     func retry() {
-        start()
+        guard let binder else { return }
+        start(binder: binder)
     }
 
-    func start() {
+    /// Install the tap and begin matching against `binder`'s chords. Call after settings
+    /// are loaded so the bindings reflect the user's configuration, not a placeholder.
+    func start(binder: HotkeyBinder) {
+        self.binder = binder
         // Idempotent: never stack a second tap (keeps `retry()` safe to call repeatedly).
         guard eventTap == nil else { return }
         let mask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue)
@@ -54,17 +79,19 @@ final class HotkeyManager {
                 eventsOfInterest: CGEventMask(mask),
                 callback: { _, type, event, refcon in
                     let manager = Unmanaged<HotkeyManager>.fromOpaque(refcon!).takeUnretainedValue()
-                    manager.handle(type: type, event: event)
+                    // Read the few primitive fields here (cheap) and hand off to the
+                    // main actor. NOTHING heavy runs in the tap — it returns immediately.
+                    manager.enqueue(type: type, event: event)
                     return Unmanaged.passUnretained(event)
                 },
                 userInfo: Unmanaged.passUnretained(self).toOpaque()
             )
         else {
+            // AX not granted: tapCreate fails. Surface an actionable message — never fail
+            // silently (User Story 15) — and the P7 fix-it (hint + exact-pane deep-link).
+            // The tap-create failure IS the AX-denied signal for the hotkey path.
             logger.error("Event tap creation failed — Accessibility permission not granted.")
-            // P7: surface the actionable fix-it (hint + exact-pane deep-link) rather than a
-            // bare/silent message. The tap-create failure IS the AX-denied signal for the
-            // hotkey path, so we map it straight to the `.accessibility` / `.denied` advice.
-            onStatusChange?("⚠️ Needs Accessibility permission")
+            onStatus?(Self.accessibilityNeededStatus)
             onAccessibilityStatus?(PermissionAdvice.make(for: .accessibility, status: .denied))
             return
         }
@@ -75,8 +102,8 @@ final class HotkeyManager {
 
         self.eventTap = tap
         self.runLoopSource = source
-        logger.info("Event tap installed. Hold F13 to test the Push-to-Talk path.")
-        onStatusChange?("Ready — hold F13 to test")
+        logger.info("Event tap installed; matching the two bound push-to-talk hotkeys.")
+        onStatus?(Self.readyStatus)
         // P7: tap installed ⇒ Accessibility is granted; clear any prior fix-it (recovery).
         onAccessibilityStatus?(nil)
     }
@@ -89,28 +116,53 @@ final class HotkeyManager {
     func revalidate() {
         guard let tap = eventTap else {
             logger.notice("Wake revalidation: no event tap installed (Accessibility not granted?).")
-            onStatusChange?("⚠️ Needs Accessibility permission")
+            onStatus?(Self.accessibilityNeededStatus)
+            onAccessibilityStatus?(PermissionAdvice.make(for: .accessibility, status: .denied))
             return
         }
         if !CGEvent.tapIsEnabled(tap: tap) {
             CGEvent.tapEnable(tap: tap, enable: true)
             logger.notice("Re-enabled the Push-to-Talk event tap after wake.")
         }
-        onStatusChange?("Ready — hold F13 to test")
+        onStatus?(Self.readyStatus)
     }
 
-    private func handle(type: CGEventType, event: CGEvent) {
-        let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
-        guard keyCode == Self.pushToTalkKeyCode else { return }
+    /// Runs on the tap's run-loop thread. Extracts primitives and hops to the main
+    /// actor; it never touches `binder`/`activeHotkey` itself (those are main-only).
+    private func enqueue(type: CGEventType, event: CGEvent) {
+        let phase: HotkeyPhase
         switch type {
-        case .keyDown:
-            logger.info("Push-to-Talk down → listening…")
-            onStatusChange?("🎙️ Listening…")
-        case .keyUp:
-            logger.info("Push-to-Talk up → processing…")
-            onStatusChange?("Ready — hold F13 to test")
-        default:
-            break
+        case .keyDown: phase = .down
+        case .keyUp: phase = .up
+        default: return  // flagsChanged etc. are not push-to-talk edges.
+        }
+        let keyCode = Int(event.getIntegerValueField(.keyboardEventKeycode))
+        let flags = event.flags.rawValue
+        Task { @MainActor [weak self] in
+            self?.process(keyCode: keyCode, eventFlags: flags, phase: phase)
+        }
+    }
+
+    /// Main-actor reaction: match the event and emit a semantic down/up.
+    @MainActor
+    private func process(keyCode: Int, eventFlags: UInt64, phase: HotkeyPhase) {
+        guard let binder else { return }
+
+        if let activation = binder.resolve(keyCode: keyCode, eventFlags: eventFlags, phase: phase) {
+            switch phase {
+            case .down: activeHotkey = activation.hotkey
+            case .up: activeHotkey = nil
+            }
+            onActivation?(activation)
+            return
+        }
+
+        // Release-edge safety net: a keyUp on the held hotkey's base key that no longer
+        // carries the modifier (user lifted the modifier first). End the hold so the UI
+        // never gets stuck in "Listening…".
+        if phase == .up, let active = activeHotkey, binder.chord(for: active).keyCode == keyCode {
+            activeHotkey = nil
+            onActivation?(HotkeyActivation(hotkey: active, phase: .up))
         }
     }
 

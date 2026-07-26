@@ -13,11 +13,14 @@ final class SettingsCodecTests: XCTestCase {
     // MARK: - Current-version decode
 
     func testCurrentVersionFileDecodesDirectlyWithoutMigration() throws {
-        // A v1 document whose audio cue is the non-default value must decode to that
-        // value and report no migration.
+        // A current-version (v2) document whose audio cue + hotkeys are non-default
+        // must decode to those values and report no migration.
         let json = Data(
             """
-            {"schema_version":1,"indicators":{"show_local_cloud_indicator":false,
+            {"schema_version":2,
+            "hotkeys":{"command_mode":{"key_code":36,"modifiers":["command","shift"],"mode":"push_to_talk"},
+            "dictation_mode":{"key_code":49,"modifiers":["control"],"mode":"push_to_talk"}},
+            "indicators":{"show_local_cloud_indicator":false,
             "audio_cue_on_listen":false,"audio_cue_on_processing":true,"overlay_position":"top_center"}}
             """.utf8)
 
@@ -25,6 +28,9 @@ final class SettingsCodecTests: XCTestCase {
 
         XCTAssertNil(decoded.migratedFrom)
         XCTAssertEqual(decoded.settings.schemaVersion, Settings.currentSchemaVersion)
+        XCTAssertEqual(decoded.settings.hotkeys.commandMode.keyCode, 36)
+        XCTAssertEqual(decoded.settings.hotkeys.commandMode.modifiers, [.command, .shift])
+        XCTAssertEqual(decoded.settings.hotkeys.dictationMode.modifiers, [.control])
         XCTAssertFalse(decoded.settings.indicators.showLocalCloudIndicator)
         XCTAssertFalse(decoded.settings.indicators.audioCueOnListen)
         XCTAssertTrue(decoded.settings.indicators.audioCueOnProcessing)
@@ -32,10 +38,10 @@ final class SettingsCodecTests: XCTestCase {
     }
 
     func testDecodeIsTolerantOfMissingFields() throws {
-        // A v1 file that only specifies one field (e.g. written by an older build)
-        // must load, with every unspecified field falling back to its default —
-        // never a decode failure.
-        let json = Data(#"{"schema_version":1,"indicators":{"audio_cue_on_listen":false}}"#.utf8)
+        // A current-version file that only specifies one field (e.g. written by an
+        // older point-build) must load, with every unspecified field — including the
+        // whole `hotkeys` block — falling back to its default, never a decode failure.
+        let json = Data(#"{"schema_version":2,"indicators":{"audio_cue_on_listen":false}}"#.utf8)
 
         let settings = try SettingsCodec.decode(json).settings
 
@@ -43,6 +49,7 @@ final class SettingsCodecTests: XCTestCase {
         XCTAssertEqual(settings.indicators.showLocalCloudIndicator, Settings.Indicators().showLocalCloudIndicator)
         XCTAssertEqual(settings.indicators.audioCueOnProcessing, Settings.Indicators().audioCueOnProcessing)
         XCTAssertEqual(settings.indicators.overlayPosition, Settings.Indicators().overlayPosition)
+        XCTAssertEqual(settings.hotkeys, Settings.Hotkeys(), "absent hotkeys block must default")
     }
 
     // MARK: - Forward migration (the acceptance-critical case)
@@ -58,12 +65,66 @@ final class SettingsCodecTests: XCTestCase {
         let decoded = try SettingsCodec.decode(legacy)
 
         XCTAssertEqual(decoded.migratedFrom, 0)
-        XCTAssertEqual(decoded.settings.schemaVersion, 1)
+        XCTAssertEqual(decoded.settings.schemaVersion, Settings.currentSchemaVersion)
         XCTAssertFalse(decoded.settings.indicators.audioCueOnListen, "user's v0 value was lost")
-        // New v1 fields the user never had get defaults, not garbage.
+        // New fields the user never had get defaults, not garbage — including the
+        // hotkeys block introduced in v2 (the v0→v1→v2 chain fills it).
         XCTAssertTrue(decoded.settings.indicators.showLocalCloudIndicator)
         XCTAssertFalse(decoded.settings.indicators.audioCueOnProcessing)
         XCTAssertEqual(decoded.settings.indicators.overlayPosition, .bottomCenter)
+        XCTAssertEqual(decoded.settings.hotkeys, Settings.Hotkeys())
+    }
+
+    // MARK: - v1 → v2 forward migration (Phase 5: the `hotkeys` block)
+
+    func testV1FileMigratesToV2GainingDefaultHotkeysWithoutIndicatorLoss() throws {
+        // A real v1 file: schema_version 1, a fully-specified `indicators` block with
+        // NON-default values, and no `hotkeys` (v1 had no such block). Migrating to v2
+        // must (a) report the upgrade from v1, (b) add the default hotkeys, and
+        // (c) preserve every existing indicators value untouched.
+        let v1 = Data(
+            """
+            {"schema_version":1,"indicators":{"show_local_cloud_indicator":false,
+            "audio_cue_on_listen":false,"audio_cue_on_processing":true,"overlay_position":"top_center"}}
+            """.utf8)
+
+        let decoded = try SettingsCodec.decode(v1)
+
+        XCTAssertEqual(decoded.migratedFrom, 1)
+        XCTAssertEqual(decoded.settings.schemaVersion, 2)
+
+        // (b) default hotkeys appear (⌥Space command, ⌃Space dictation, push-to-talk).
+        XCTAssertEqual(decoded.settings.hotkeys, Settings.Hotkeys())
+        XCTAssertEqual(decoded.settings.hotkeys.commandMode.keyCode, 49)
+        XCTAssertEqual(decoded.settings.hotkeys.commandMode.modifiers, [.option])
+        XCTAssertEqual(decoded.settings.hotkeys.dictationMode.keyCode, 49)
+        XCTAssertEqual(decoded.settings.hotkeys.dictationMode.modifiers, [.control])
+        XCTAssertEqual(decoded.settings.hotkeys.commandMode.mode, .pushToTalk)
+
+        // (c) no loss: every v1 indicators value survives the migration exactly.
+        XCTAssertFalse(decoded.settings.indicators.showLocalCloudIndicator)
+        XCTAssertFalse(decoded.settings.indicators.audioCueOnListen)
+        XCTAssertTrue(decoded.settings.indicators.audioCueOnProcessing)
+        XCTAssertEqual(decoded.settings.indicators.overlayPosition, .topCenter)
+    }
+
+    func testV1MigrationPreservesAnExplicitlyBoundHotkeyIfPresent() throws {
+        // Defensive: if a v1 file somehow already carries a `hotkeys` block, migration
+        // must NOT clobber it with the defaults (the step only fills a missing block).
+        let v1 = Data(
+            """
+            {"schema_version":1,
+            "hotkeys":{"command_mode":{"key_code":100,"modifiers":["command"],"mode":"push_to_talk"}}}
+            """.utf8)
+
+        let decoded = try SettingsCodec.decode(v1)
+
+        XCTAssertEqual(decoded.migratedFrom, 1)
+        XCTAssertEqual(decoded.settings.hotkeys.commandMode.keyCode, 100)
+        XCTAssertEqual(decoded.settings.hotkeys.commandMode.modifiers, [.command])
+        // The unspecified dictation binding still tolerant-decodes to its default.
+        XCTAssertEqual(
+            decoded.settings.hotkeys.dictationMode, Settings.HotkeyBinding(keyCode: 49, modifiers: [.control]))
     }
 
     func testExplicitV0VersionAlsoMigrates() throws {
@@ -130,6 +191,19 @@ final class SettingsCodecTests: XCTestCase {
         let text = try XCTUnwrap(String(data: try SettingsCodec.encode(.defaults), encoding: .utf8))
         XCTAssertTrue(text.contains("\"schema_version\""))
         XCTAssertTrue(text.contains("\"audio_cue_on_listen\""))
+        XCTAssertTrue(text.contains("\"command_mode\""))
+        XCTAssertTrue(text.contains("\"key_code\""))
         XCTAssertTrue(text.contains("\n"), "expected pretty-printed (multi-line) JSON")
+    }
+
+    // MARK: - Defaults match the spec (§2.5)
+
+    func testDefaultHotkeysMatchTheSpec() {
+        // §2.5: command_mode = ⌥Space, dictation_mode = ⌃Space, both push-to-talk.
+        let hotkeys = Settings.defaults.hotkeys
+        XCTAssertEqual(
+            hotkeys.commandMode, Settings.HotkeyBinding(keyCode: 49, modifiers: [.option], mode: .pushToTalk))
+        XCTAssertEqual(
+            hotkeys.dictationMode, Settings.HotkeyBinding(keyCode: 49, modifiers: [.control], mode: .pushToTalk))
     }
 }
