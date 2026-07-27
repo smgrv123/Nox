@@ -31,25 +31,10 @@ public struct PermissionAdvice: Equatable, Sendable {
         case .granted:
             return nil
         case .denied, .notDetermined:
-            return "\(consequence(of: permission)) Open \(permission.settingsPaneName) and turn Aide on."
+            return "\(permission.deniedConsequence) Open \(permission.settingsPaneName) and turn Aide on."
         case .restricted:
-            return "\(consequence(of: permission)) It's restricted by a system policy "
+            return "\(permission.deniedConsequence) It's restricted by a system policy "
                 + "(e.g. MDM or Screen Time); ask your administrator, then check \(permission.settingsPaneName)."
-        }
-    }
-
-    /// What the user loses while the permission is missing — the "why it matters" half
-    /// of the hint, constant per permission.
-    private static func consequence(of permission: Permission) -> String {
-        switch permission {
-        case .microphone:
-            return "Aide can't hear you, so voice commands and dictation are off."
-        case .accessibility:
-            return "Aide's global hotkeys and text insertion can't work."
-        case .screenRecording:
-            return "Aide can't read your screen, so Screen Q&A is off."
-        case .calendar:
-            return "Aide can't read your calendar, so schedule questions are off."
         }
     }
 }

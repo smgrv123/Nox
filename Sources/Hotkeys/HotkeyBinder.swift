@@ -98,4 +98,33 @@ public struct HotkeyBinder: Equatable, Sendable {
         guard let hotkey = semanticHotkey(forKeyCode: keyCode, modifiers: modifiers) else { return nil }
         return HotkeyActivation(hotkey: hotkey, phase: phase)
     }
+
+    /// Full push-to-talk decision for one tap event, including the release-edge safety
+    /// net: the normal chord match above, **plus** the fallback that ends a hold whose
+    /// modifier was released a hair before its base key (so the tap reports the keyUp
+    /// without the modifier bit, and the plain match above misses it). Without the
+    /// fallback the UI would stick in "Listening…" forever.
+    ///
+    /// The normal match is tried first and wins on precedence — e.g. if `activeHotkey`
+    /// is `.dictation` but this keyUp's `(keyCode, modifiers)` now exactly matches
+    /// `.command`'s chord, the event is reported as ending `.command`, not `.dictation`.
+    /// The fallback only fires on a `.up` phase for the base key of the currently held
+    /// hotkey (`activeHotkey`), regardless of what modifiers (if any) still accompany it.
+    ///
+    /// `activeHotkey` is the caller's held-hotkey state — mutable per-session state that
+    /// stays owned by the `@MainActor` shell (`App/HotkeyManager.swift`); this method
+    /// only reads the value it's given and returns a decision, keeping `HotkeyBinder`
+    /// itself a stateless `Sendable` value type.
+    public func resolve(
+        keyCode: Int,
+        eventFlags: UInt64,
+        phase: HotkeyPhase,
+        activeHotkey: SemanticHotkey?
+    ) -> HotkeyActivation? {
+        if let activation = resolve(keyCode: keyCode, eventFlags: eventFlags, phase: phase) {
+            return activation
+        }
+        guard phase == .up, let active = activeHotkey, chord(for: active).keyCode == keyCode else { return nil }
+        return HotkeyActivation(hotkey: active, phase: .up)
+    }
 }

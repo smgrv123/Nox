@@ -39,13 +39,7 @@ public struct HistoryLog: Sendable {
     // MARK: - Append
 
     private func appendData(_ data: Data) throws {
-        if let handle = try? FileHandle(forWritingTo: fileURL) {
-            defer { try? handle.close() }
-            try handle.seekToEnd()
-            try handle.write(contentsOf: data)
-        } else {
-            try data.write(to: fileURL)
-        }
+        try FileAppender.append(data, to: fileURL)
     }
 
     // MARK: - Codec (shared, LLD §2.6 conventions)

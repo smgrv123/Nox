@@ -38,13 +38,6 @@ public final class AppLog: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
 
-        if let handle = try? FileHandle(forWritingTo: fileURL) {
-            defer { try? handle.close() }
-            _ = try? handle.seekToEnd()
-            try? handle.write(contentsOf: data)
-        } else {
-            // No file yet — the first line creates it.
-            try? data.write(to: fileURL)
-        }
+        try? FileAppender.append(data, to: fileURL)
     }
 }

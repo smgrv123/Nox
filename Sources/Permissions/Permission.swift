@@ -32,6 +32,21 @@ public enum Permission: String, CaseIterable, Sendable {
         "Privacy & Security → \(displayName)"
     }
 
+    /// What the user loses while the permission is missing — the "why it matters" half
+    /// of the fix-it hint (User Story 26), constant per permission.
+    public var deniedConsequence: String {
+        switch self {
+        case .microphone:
+            return "Aide can't hear you, so voice commands and dictation are off."
+        case .accessibility:
+            return "Aide's global hotkeys and text insertion can't work."
+        case .screenRecording:
+            return "Aide can't read your screen, so Screen Q&A is off."
+        case .calendar:
+            return "Aide can't read your calendar, so schedule questions are off."
+        }
+    }
+
     /// Deep-link that opens the **exact** System Settings pane for this permission
     /// (LLD §8). Re-granting there recovers the dependent features.
     public var settingsDeepLink: URL {

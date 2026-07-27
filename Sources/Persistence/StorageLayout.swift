@@ -108,12 +108,7 @@ public struct StorageLayout: Sendable {
         root.appending(path: name)
     }
 
-    private static let dayFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .iso8601)
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(identifier: "UTC")
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter
-    }()
+    private static let dayFormatter: DateFormatter = UTCDateFormatter.make(
+        dateFormat: "yyyy-MM-dd",
+        calendar: Calendar(identifier: .iso8601))
 }

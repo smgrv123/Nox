@@ -153,4 +153,50 @@ final class HotkeyBinderTests: XCTestCase {
 
         XCTAssertEqual(binder.semanticHotkey(forKeyCode: spaceKey, modifiers: [.option]), .command)
     }
+
+    // MARK: - (3) full decision, incl. release-edge safety net
+
+    func testReleaseEdgeFallbackEndsHoldWhenTheModifierWasLiftedFirst() {
+        // The user released ⌥ a hair before Space; the tap reports a bare-Space keyUp,
+        // which the plain chord match (2b above) does not match. The fallback must still
+        // end the `.command` hold rather than leave the UI stuck in "Listening…".
+        let binder = HotkeyBinder(hotkeys: Settings.Hotkeys())
+
+        XCTAssertEqual(
+            binder.resolve(keyCode: spaceKey, eventFlags: 0, phase: .up, activeHotkey: .command),
+            HotkeyActivation(hotkey: .command, phase: .up))
+    }
+
+    func testReleaseEdgeFallbackDoesNotFireOnKeyDown() {
+        // The fallback only ever ends a hold; it must never fabricate a down-edge.
+        let binder = HotkeyBinder(hotkeys: Settings.Hotkeys())
+
+        XCTAssertNil(binder.resolve(keyCode: spaceKey, eventFlags: 0, phase: .down, activeHotkey: .command))
+    }
+
+    func testReleaseEdgeFallbackIgnoresAKeyUpForAnUnrelatedKey() {
+        // Only a keyUp on the *held* hotkey's own base key qualifies.
+        let binder = HotkeyBinder(hotkeys: Settings.Hotkeys())
+
+        XCTAssertNil(
+            binder.resolve(keyCode: 36, eventFlags: 0, phase: .up, activeHotkey: .command), "⌥Return, not Space")
+    }
+
+    func testReleaseEdgeFallbackDoesNothingWithoutAHeldHotkey() {
+        // No hold in progress ⇒ nothing to safety-net.
+        let binder = HotkeyBinder(hotkeys: Settings.Hotkeys())
+
+        XCTAssertNil(binder.resolve(keyCode: spaceKey, eventFlags: 0, phase: .up, activeHotkey: nil))
+    }
+
+    func testNormalMatchTakesPrecedenceOverTheReleaseEdgeFallback() {
+        // `activeHotkey` is `.dictation`, but this keyUp's own modifiers now exactly
+        // match `.command`'s chord (⌥Space). The plain match must win: the event is
+        // reported as ending `.command`, not falsely extending the `.dictation` hold.
+        let binder = HotkeyBinder(hotkeys: Settings.Hotkeys())
+
+        XCTAssertEqual(
+            binder.resolve(keyCode: spaceKey, eventFlags: optionFlag, phase: .up, activeHotkey: .dictation),
+            HotkeyActivation(hotkey: .command, phase: .up))
+    }
 }

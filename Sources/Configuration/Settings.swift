@@ -83,8 +83,8 @@ extension Settings {
         public var dictationMode: HotkeyBinding
 
         public init(
-            commandMode: HotkeyBinding = HotkeyBinding(keyCode: 49, modifiers: [.option]),
-            dictationMode: HotkeyBinding = HotkeyBinding(keyCode: 49, modifiers: [.control])
+            commandMode: HotkeyBinding = HotkeyBinding(keyCode: HotkeyBinding.spaceKeyCode, modifiers: [.option]),
+            dictationMode: HotkeyBinding = HotkeyBinding(keyCode: HotkeyBinding.spaceKeyCode, modifiers: [.control])
         ) {
             self.commandMode = commandMode
             self.dictationMode = dictationMode
@@ -109,6 +109,11 @@ extension Settings {
     /// (§2.5 — `{ key_code, modifiers[], mode }`). `keyCode` is a hardware virtual
     /// key code (49 = Space); `modifiers` are the chord's required modifier keys.
     public struct HotkeyBinding: Equatable, Sendable, Codable {
+
+        /// Hardware virtual key code of the Space bar — the base key of both spec
+        /// defaults (⌥Space command mode, ⌃Space dictation mode) and the fallback used
+        /// when decoding a binding whose `key_code` is missing.
+        public static let spaceKeyCode = 49
 
         /// Hardware virtual key code of the base key (e.g. 49 = Space). Matches the
         /// value the event tap reports for `keyboardEventKeycode`.
@@ -137,7 +142,7 @@ extension Settings {
             // A binding with no key_code is meaningless; fall back to Space so a
             // partial/hand-edited file still yields a usable (if generic) binding
             // rather than throwing.
-            self.keyCode = try container.decodeIfPresent(Int.self, forKey: .keyCode) ?? 49
+            self.keyCode = try container.decodeIfPresent(Int.self, forKey: .keyCode) ?? HotkeyBinding.spaceKeyCode
             self.modifiers = try container.decodeIfPresent([HotkeyModifier].self, forKey: .modifiers) ?? []
             self.mode = try container.decodeIfPresent(HotkeyMode.self, forKey: .mode) ?? .pushToTalk
         }

@@ -57,8 +57,10 @@ final class AppCoordinator: ObservableObject {
     /// §13.3). Distinct from the non-activating overlay — see `ConfirmationModal`.
     private let confirmationModal = ConfirmationModal()
 
-    /// Sleep/wake observer tokens (PHASE 11; User Story 37), torn down in `deinit`.
-    private var sleepWakeObservers: [NSObjectProtocol] = []
+    /// Sleep/wake observation (PHASE 11; User Story 37). `SleepWakeObserver` owns the
+    /// `NSWorkspace` tokens and tears them down in its own `deinit` when this property
+    /// is released — no explicit teardown needed here.
+    private var sleepWakeObserver: SleepWakeObserver?
 
     /// The resolved Application Support layout and its plain-text log, populated on
     /// first launch (User Stories 33, 35). Later P1 phases (settings, history, wipe)
@@ -150,26 +152,17 @@ final class AppCoordinator: ObservableObject {
     /// Observe system sleep/wake so the app resumes in a sane state (PHASE 11; User
     /// Stories 37, 38). Both edges are recorded to `app.log` (a human-readable state,
     /// never silence); on wake the hotkey tap — which macOS can disable across sleep —
-    /// is re-asserted so Push-to-Talk keeps working. Notifications arrive on `.main`.
+    /// is re-asserted so Push-to-Talk keeps working. Notifications arrive on `.main`
+    /// (`SleepWakeObserver`'s contract).
     private func installSleepWakeObserver() {
-        let center = NSWorkspace.shared.notificationCenter
-        let sleep = center.addObserver(
-            forName: NSWorkspace.willSleepNotification, object: nil, queue: .main
-        ) { [weak self] _ in
-            self?.appLog?.log("System is going to sleep.", level: .notice)
-        }
-        let wake = center.addObserver(
-            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
-        ) { [weak self] _ in
-            self?.appLog?.log("System woke from sleep — revalidating hotkey capture.", level: .notice)
-            self?.hotkeys.revalidate()
-        }
-        sleepWakeObservers = [sleep, wake]
-    }
-
-    deinit {
-        let center = NSWorkspace.shared.notificationCenter
-        for observer in sleepWakeObservers { center.removeObserver(observer) }
+        sleepWakeObserver = SleepWakeObserver(
+            onSleep: { [weak self] in
+                self?.appLog?.log("System is going to sleep.", level: .notice)
+            },
+            onWake: { [weak self] in
+                self?.appLog?.log("System woke from sleep — revalidating hotkey capture.", level: .notice)
+                self?.hotkeys.revalidate()
+            })
     }
 
     /// Create the Application Support tree (idempotent — only what's missing) and

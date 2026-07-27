@@ -95,11 +95,6 @@ public struct SettingsStore {
     }
 
     /// Filesystem-safe UTC stamp for backup names (no colons): `20260724T205040Z`.
-    private static let backupStamp: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(identifier: "UTC")
-        formatter.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
-        return formatter
-    }()
+    private static let backupStamp: DateFormatter = UTCDateFormatter.make(
+        dateFormat: "yyyyMMdd'T'HHmmss'Z'")
 }

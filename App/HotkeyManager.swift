@@ -143,27 +143,22 @@ final class HotkeyManager {
         }
     }
 
-    /// Main-actor reaction: match the event and emit a semantic down/up.
+    /// Main-actor reaction: ask the binder for the decision (normal chord match, or its
+    /// release-edge fallback — see `HotkeyBinder.resolve(keyCode:eventFlags:phase:activeHotkey:)`)
+    /// and update the held-hotkey state from the result.
     @MainActor
     private func process(keyCode: Int, eventFlags: UInt64, phase: HotkeyPhase) {
         guard let binder else { return }
+        guard
+            let activation = binder.resolve(
+                keyCode: keyCode, eventFlags: eventFlags, phase: phase, activeHotkey: activeHotkey)
+        else { return }
 
-        if let activation = binder.resolve(keyCode: keyCode, eventFlags: eventFlags, phase: phase) {
-            switch phase {
-            case .down: activeHotkey = activation.hotkey
-            case .up: activeHotkey = nil
-            }
-            onActivation?(activation)
-            return
+        switch activation.phase {
+        case .down: activeHotkey = activation.hotkey
+        case .up: activeHotkey = nil
         }
-
-        // Release-edge safety net: a keyUp on the held hotkey's base key that no longer
-        // carries the modifier (user lifted the modifier first). End the hold so the UI
-        // never gets stuck in "Listening…".
-        if phase == .up, let active = activeHotkey, binder.chord(for: active).keyCode == keyCode {
-            activeHotkey = nil
-            onActivation?(HotkeyActivation(hotkey: active, phase: .up))
-        }
+        onActivation?(activation)
     }
 
     deinit {
