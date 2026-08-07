@@ -79,7 +79,9 @@ final class SettingsStoreTests: XCTestCase {
         try store.save(store.load())
 
         let text = try XCTUnwrap(String(data: try Data(contentsOf: settingsURL), encoding: .utf8))
-        XCTAssertTrue(text.contains("\"schema_version\" : 2"), "rewritten file carries the current schema version")
+        XCTAssertTrue(
+            text.contains("\"schema_version\" : \(Settings.currentSchemaVersion)"),
+            "rewritten file carries the current schema version")
         XCTAssertFalse(text.contains("\"audio_cue\""), "legacy flat key should be gone")
         XCTAssertTrue(text.contains("\"audio_cue_on_listen\" : false"), "migrated value must survive the rewrite")
     }
@@ -123,6 +125,93 @@ final class SettingsStoreTests: XCTestCase {
         var settings = Settings.defaults
         settings.indicators.audioCueOnListen = false
         try store.save(settings)
+
+        XCTAssertEqual(makeStore().load(), settings)
+    }
+
+    // MARK: - Acceptance #4: unmodeled top-level blocks survive save() (§2.5)
+
+    func testSaveDoesNotDropUnmodeledTopLevelBlocks() throws {
+        // Seed a document with every currently-modeled block PLUS a real §2.5 block
+        // (`tone`) this build's `Settings` doesn't represent yet (Phase 10 modeled
+        // `privacy`, so `tone` is now the stand-in unmodeled example). A load →
+        // modify a modeled field → save() cycle must keep `tone` byte-for-byte,
+        // while the modeled change still lands.
+        let seeded = Data(
+            """
+            {"schema_version":3,
+            "hotkeys":{"command_mode":{"key_code":49,"modifiers":["option"],"mode":"push_to_talk"},
+            "dictation_mode":{"key_code":49,"modifiers":["control"],"mode":"push_to_talk"}},
+            "indicators":{"show_local_cloud_indicator":true,
+            "audio_cue_on_listen":true,"audio_cue_on_processing":false,"overlay_position":"bottom_center"},
+            "tone":{"default_preset":"as_is","available":["as_is","professional","casual","concise"]}}
+            """.utf8)
+        try seeded.write(to: settingsURL)
+        let store = makeStore()
+
+        var settings = store.load()
+        settings.indicators.audioCueOnListen = false  // the modeled change
+        try store.save(settings)
+
+        let raw = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: try Data(contentsOf: settingsURL)) as? [String: Any])
+        let tone = try XCTUnwrap(raw["tone"] as? [String: Any])
+        XCTAssertEqual(tone["default_preset"] as? String, "as_is", "unmodeled block must survive save() verbatim")
+        XCTAssertEqual(tone["available"] as? [String], ["as_is", "professional", "casual", "concise"])
+
+        // Nothing modeled was lost either — the change persisted.
+        let reloaded = makeStore().load()
+        XCTAssertFalse(reloaded.indicators.audioCueOnListen)
+        XCTAssertEqual(reloaded, settings)
+    }
+
+    // MARK: - Acceptance #5: onboarding + privacy round-trip (Phase 10)
+
+    func testOnboardingProgressAndPrivacyDisclosurePersistAcrossReload() throws {
+        var settings = Settings.defaults
+        settings.onboarding.resumeStep = "permission_accessibility"
+        settings.privacy.networkUtilitiesDisclosed = true
+
+        try makeStore().save(settings)
+
+        let reloaded = makeStore().load()
+        XCTAssertEqual(reloaded.onboarding.resumeStep, "permission_accessibility")
+        XCTAssertTrue(reloaded.privacy.networkUtilitiesDisclosed)
+    }
+
+    func testOldFileWithoutOnboardingOrPrivacyLoadsSafeDefaults() throws {
+        // A pre-Phase-10 v2 file — no `privacy`/`onboarding` blocks at all. Loading
+        // it must not crash and must yield the safe "not yet onboarded, not
+        // disclosed" defaults (User Story 24's resumability depends on this never
+        // blowing up on an older file).
+        try Data(#"{"schema_version":2,"hotkeys":{},"indicators":{}}"#.utf8).write(to: settingsURL)
+
+        let loaded = makeStore().load()
+
+        XCTAssertFalse(loaded.onboarding.completed)
+        XCTAssertEqual(loaded.onboarding.resumeStep, "welcome")
+        XCTAssertFalse(loaded.privacy.networkUtilitiesDisclosed)
+    }
+
+    func testFirstRunSaveWithNoExistingFileWritesValidDocument() throws {
+        // No prior file — first run / post-wipe. save() must not choke looking for
+        // bytes to merge, and must still produce a decodable, current-schema document.
+        XCTAssertFalse(fileManager.fileExists(atPath: settingsURL.path), "precondition: nothing on disk yet")
+
+        try makeStore().save(.defaults)
+
+        XCTAssertEqual(makeStore().load(), .defaults)
+    }
+
+    func testSaveWithCorruptExistingFileDoesNotThrowAndWritesModeledBlocks() throws {
+        // A corrupt file sitting at the destination (e.g. save() called directly,
+        // without going through load()'s backup-and-recover path first) must not
+        // crash or throw the save — it should just fall back to the modeled encoding.
+        try Data("{ not valid json".utf8).write(to: settingsURL)
+        var settings = Settings.defaults
+        settings.indicators.overlayPosition = .topCenter
+
+        XCTAssertNoThrow(try makeStore().save(settings))
 
         XCTAssertEqual(makeStore().load(), settings)
     }

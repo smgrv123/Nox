@@ -1,4 +1,5 @@
 import AppKit
+import Configuration
 import Overlay
 import SwiftUI
 
@@ -23,8 +24,34 @@ final class OverlayController: ObservableObject {
     /// thread via `send` / `debugForce`, which keep it in step with `machine`.
     @Published private(set) var state: OverlayState = .initial
 
+    /// The latest transcript from the current/most recent voice session (Phase 6;
+    /// User Stories 2, 39, 40), shown while `.processing`. `nil` before any session
+    /// has produced one. Set via `present(transcript:result:)`.
+    @Published private(set) var transcript: String?
+
+    /// The latest result summary from the current/most recent voice session
+    /// (Phase 6), shown once `.showingResult`. `nil` before a session has produced a
+    /// result.
+    @Published private(set) var result: String?
+
+    /// Whether to render the Local/Cloud indicator badge (Phase 9; User Stories 29,
+    /// 30). Mirrors `settings.indicators.showLocalCloudIndicator`; `AppCoordinator`
+    /// keeps it in sync via `applyIndicatorSettings` on load and on every persisted
+    /// change. P1 always shows a static "LOCAL" badge when this is on — the live
+    /// LOCAL/CLOUD state it will eventually reflect is P6 (BYOK cloud escalation) scope.
+    /// `Configuration.Settings` is spelled out below because this file also imports
+    /// SwiftUI, whose own `Settings` scene type would otherwise make the bare name
+    /// ambiguous.
+    @Published private(set) var showLocalCloudIndicator = Configuration.Settings.Indicators().showLocalCloudIndicator
+
     /// The pure, guarded state machine (the tested core).
     private var machine = OverlayStateMachine()
+
+    /// Where the panel is shown on screen (Phase 9; User Story 29), kept in sync with
+    /// `settings.indicators.overlayPosition` by `applyIndicatorSettings`. Defaults to
+    /// `Configuration.Settings.Indicators()`'s default (bottom-center) so a show before
+    /// settings load still lands somewhere sane.
+    private var overlayPosition = Configuration.Settings.Indicators().overlayPosition
 
     /// Lazily created on first show so app launch never touches the window server
     /// until the Overlay is actually needed.
@@ -50,6 +77,24 @@ final class OverlayController: ObservableObject {
     func debugForce(_ target: OverlayState) {
         machine = OverlayStateMachine(state: target)
         syncToState()
+    }
+
+    /// PHASE 6: set by `VoiceSessionCoordinator`'s injected `presentText` sink as a
+    /// session progresses (transcript first, then result) — see `AppCoordinator`.
+    /// Both reset to `nil` at the start of a fresh/restarted session so a stale value
+    /// never lingers into the next one.
+    func present(transcript: String?, result: String?) {
+        self.transcript = transcript
+        self.result = result
+    }
+
+    /// Apply the user's overlay-position + indicator-visibility preferences (Phase 9;
+    /// User Stories 29, 30). Called by `AppCoordinator` once after settings load and
+    /// again after every persisted change, so the **next** `showPanel()` reflects the
+    /// current settings — no relaunch needed.
+    func applyIndicatorSettings(_ indicators: Configuration.Settings.Indicators) {
+        overlayPosition = indicators.overlayPosition
+        showLocalCloudIndicator = indicators.showLocalCloudIndicator
     }
 
     /// Reflect `machine.state` into the published state and the panel's visibility.
@@ -94,15 +139,22 @@ final class OverlayController: ObservableObject {
         return created
     }
 
-    /// Bottom-center of the active screen (matches the `overlay_position` default).
+    /// Top- or bottom-center of the active screen, per `overlayPosition` (Phase 9;
+    /// User Story 29 — defaults to bottom-center, matching `Settings.Indicators`'s
+    /// default).
     private func position(_ panel: NSPanel) {
         guard let screen = NSScreen.main else { return }
         let visible = screen.visibleFrame
         let size = panel.frame.size
-        let origin = NSPoint(
-            x: visible.midX - size.width / 2,
-            y: visible.minY + 120)
-        panel.setFrameOrigin(origin)
+        let originX = visible.midX - size.width / 2
+        let originY: CGFloat
+        switch overlayPosition {
+        case .bottomCenter:
+            originY = visible.minY + 120
+        case .topCenter:
+            originY = visible.maxY - size.height - 60
+        }
+        panel.setFrameOrigin(NSPoint(x: originX, y: originY))
     }
 }
 

@@ -22,6 +22,8 @@ let package = Package(
         .library(name: "Overlay", targets: ["Overlay"]),
         .library(name: "Permissions", targets: ["Permissions"]),
         .library(name: "Hotkeys", targets: ["Hotkeys"]),
+        .library(name: "VoiceSession", targets: ["VoiceSession"]),
+        .library(name: "Onboarding", targets: ["Onboarding"]),
     ],
     targets: [
         .target(name: "AideCore"),
@@ -63,6 +65,29 @@ let package = Package(
             name: "Hotkeys",
             dependencies: ["Configuration"]
         ),
+        // Phase 6's marquee orchestration (docs/04-hld.md §13, docs/05-lld.md §10):
+        // wires Phase 5's hotkey to Phase 4's Overlay through the `AideCore`
+        // `VoiceSessionDriver` seam. `MockVoiceSessionDriver` is P1's conformer — a
+        // real STT/routing engine (P2/P4) swaps in later with no change to
+        // `VoiceSessionCoordinator` or anything upstream of it. Pure orchestration:
+        // every effect (the Overlay sink, the audio cue, the auto-hide timer) is
+        // injected, so it's unit-tested headlessly with fakes, no real delays.
+        .target(
+            name: "VoiceSession",
+            dependencies: ["AideCore", "Overlay", "Hotkeys"]
+        ),
+        // Phase 10's first-run flow coordinator (docs/04-hld.md §14, LLD §8; User
+        // Stories 16–24): a pure ordered step machine over welcome → tier confirm →
+        // one step per `Permission` → the one-time network-utilities disclosure →
+        // hotkey setup → guided first success → the graceful-degradation summary.
+        // Depends only on `Permissions` (for `Permission`/`PermissionStatus`) and
+        // `AideCore` — no AppKit, no Configuration; the App layer bridges this
+        // module's pure state to/from `Configuration.Settings` (specs/P1
+        // §"Onboarding").
+        .target(
+            name: "Onboarding",
+            dependencies: ["AideCore", "Permissions"]
+        ),
         .testTarget(
             name: "AppLifecycleTests",
             dependencies: ["AppLifecycle"]
@@ -90,6 +115,14 @@ let package = Package(
         .testTarget(
             name: "HotkeysTests",
             dependencies: ["Hotkeys"]
+        ),
+        .testTarget(
+            name: "VoiceSessionTests",
+            dependencies: ["VoiceSession", "AideCore", "Overlay", "Hotkeys"]
+        ),
+        .testTarget(
+            name: "OnboardingTests",
+            dependencies: ["Onboarding", "Permissions"]
         ),
     ]
 )

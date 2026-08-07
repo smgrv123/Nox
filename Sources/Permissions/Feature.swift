@@ -15,7 +15,7 @@ public enum Feature: String, CaseIterable, Sendable {
     case wakeWord
     /// AX-path text insertion (Accessibility).
     case textInsertion
-    /// Global push-to-talk hotkey via `CGEventTap` (Accessibility).
+    /// Global push-to-talk hotkey via `CGEventTap` (Input Monitoring).
     case hotkeyCapture
     /// Screen Q&A via `screencapture` (Screen Recording).
     case screenQA
@@ -26,7 +26,8 @@ public enum Feature: String, CaseIterable, Sendable {
     public var requiredPermission: Permission {
         switch self {
         case .commandMode, .dictationMode, .wakeWord: return .microphone
-        case .textInsertion, .hotkeyCapture: return .accessibility
+        case .textInsertion: return .accessibility
+        case .hotkeyCapture: return .inputMonitoring
         case .screenQA: return .screenRecording
         case .calendarSkill: return .calendar
         }

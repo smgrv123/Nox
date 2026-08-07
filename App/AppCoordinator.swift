@@ -3,8 +3,11 @@ import AppKit
 import AppLifecycle
 import Configuration
 import Hotkeys
+import Onboarding
+import Overlay
 import Permissions
 import Persistence
+import VoiceSession
 import os
 
 /// Owns Aide's app lifecycle: single-instance enforcement at launch, the
@@ -12,10 +15,10 @@ import os
 /// the menubar renders. `AppDelegate` delegates lifecycle ownership here rather
 /// than holding everything ad hoc (specs/P1 §"AppCoordinator"; User Stories 3, 4, 36).
 ///
-/// Phase 1 scope: the menubar shell + single-instance guarantee. The voice-session
-/// seam, sleep/wake handling, and richer status arrive in later P1 phases. The
-/// effectful `NSRunningApplication` lookup lives here; the *decision* is the pure,
-/// tested `SingleInstanceGuard`.
+/// This primary declaration holds lifecycle wiring + shared state; two cohesive
+/// concern-groups live in same-type extensions so no single file/type grows
+/// unwieldy: persisted settings mutations (`AppCoordinator+SettingsMutation.swift`)
+/// and the first-run onboarding flow (`AppCoordinator+Onboarding.swift`).
 final class AppCoordinator: ObservableObject {
 
     /// Human-readable status surfaced in the menubar menu (User Stories 3, 10).
@@ -27,17 +30,28 @@ final class AppCoordinator: ObservableObject {
     private var idleStatus = "Starting…"
 
     /// The loaded user preferences (docs/05-lld.md §2.5). Main-actor-owned state the
-    /// menubar reads; mutated only through the setters below, which also persist.
-    /// Defaults are in place before `applicationDidFinishLaunching()` loads the file,
-    /// so the UI is always safe to render.
+    /// menubar reads; `private(set)` so no other App code can write it without also
+    /// persisting it — the only way to change it is `updateSettings(_:)` below, which
+    /// every setter in `AppCoordinator+SettingsMutation.swift` and every settings
+    /// write in `AppCoordinator+Onboarding.swift` goes through. Defaults are in place
+    /// before `applicationDidFinishLaunching()` loads the file, so the UI is always
+    /// safe to render.
     @Published private(set) var settings: Settings = .defaults
 
-    /// P7 (User Stories 15, 26): the persistent, actionable fix-it for the Accessibility
+    /// P7 (User Stories 15, 26): the persistent, actionable fix-it for the Input Monitoring
     /// grant that the hotkey path needs. `nil` when granted (nothing to fix). The menubar
     /// renders `hint` + a deep-link button; re-granting clears it (recovery).
-    @Published private(set) var accessibilityFixIt: PermissionAdvice?
+    @Published private(set) var inputMonitoringFixIt: PermissionAdvice?
 
-    private let hotkeys = HotkeyManager()
+    /// PHASE 10 (User Stories 16–24): the pure first-run flow's current state, or
+    /// `nil` when onboarding isn't showing (not yet started this launch, or already
+    /// completed). `OnboardingWindow` observes this to know when to show/hide;
+    /// `App/Onboarding/*` step views read `currentStep` to render. Every mutation
+    /// goes through the `onboarding*` methods (`AppCoordinator+Onboarding.swift`),
+    /// which also persist progress.
+    @Published var onboardingFlow: OnboardingFlow?
+
+    let hotkeys = HotkeyManager()
     private let singleInstance = SingleInstanceGuard()
 
     /// The non-activating Overlay panel + its state machine (Phase 4; User Stories 5,
@@ -45,17 +59,55 @@ final class AppCoordinator: ObservableObject {
     /// through `overlay.send(_:)`. `internal` so the menubar's temporary debug items
     /// can drive it (see `MenubarMenu`).
     let overlay = OverlayController()
+
+    /// PHASE 6 (the marquee E2E loop; User Stories 2, 8, 39, 40, 41): the
+    /// `AideCore.VoiceSessionDriver` seam's P1 conformer. A real STT/routing engine
+    /// (P2/P4) swaps in later by conforming to the same protocol — nothing else in
+    /// this file changes (the seam property specs/P1 calls out).
+    private let voiceDriver = MockVoiceSessionDriver()
+
+    /// Orchestrates hotkey → Overlay → `voiceDriver` → Overlay (docs/04-hld.md §13,
+    /// docs/05-lld.md §10). `lazy` because its `emit` sink is `overlay.send` and its
+    /// `playCue`/`presentText` sinks close over `self` — all only valid once this
+    /// instance is fully initialized; first access is from `startHotkeys()`.
+    private lazy var voiceSession = VoiceSessionCoordinator(
+        driver: voiceDriver,
+        emit: overlay.send,
+        playCue: { [weak self] in self?.playListenCue() },
+        scheduleAutoHide: { work in
+            DispatchQueue.main.asyncAfter(deadline: .now() + AppCoordinator.resultDisplayDuration, execute: work)
+        },
+        presentText: { [weak self] transcript, result in
+            self?.overlay.present(transcript: transcript, result: result?.summary)
+        },
+        playProcessingCue: { [weak self] in self?.playProcessingCue() },
+        reportStatus: { [weak self] phase in self?.reflectVoiceSessionPhase(phase) })
+
+    /// How long `.showingResult` stays on screen before Phase 6's loop auto-hides it.
+    private static let resultDisplayDuration: TimeInterval = 2.5
+
     private let logger = Logger(subsystem: Build.bundleIdentifier, category: "Lifecycle")
 
     /// Prompt-free permission detection for all four permissions (User Story 27). The
     /// pure hint/deep-link/degradation logic lives in `PermissionGate`; the injected
     /// `SystemPermissionReader` is the thin effectful TCC shell. Later phases (the
     /// Settings Permissions pane) reuse this same gate.
-    private let permissionGate = PermissionGate(read: SystemPermissionReader().liveStatus)
+    let permissionGate = PermissionGate(read: SystemPermissionReader().liveStatus)
 
     /// The separate, focus-taking confirmation window (PHASE 11; docs/04-hld.md
     /// §13.3). Distinct from the non-activating overlay — see `ConfirmationModal`.
     private let confirmationModal = ConfirmationModal()
+
+    /// PHASE 10: the first-run walkthrough's window — an ordinary, focus-taking
+    /// `NSWindow` (mirrors `ConfirmationModal`'s imperative AppKit mechanism, the
+    /// established idiom for chrome outside the `MenuBarExtra`/Settings scenes).
+    let onboardingWindow = OnboardingWindow()
+
+    /// PHASE 10 (User Story 20): fires while a permission step is on screen so a
+    /// grant made in System Settings is picked up even without the user switching
+    /// focus back to Aide (which `applicationDidBecomeActive()` also covers,
+    /// immediately). `nil` whenever onboarding isn't sitting on a permission step.
+    var onboardingPermissionPollTimer: Timer?
 
     /// Sleep/wake observation (PHASE 11; User Story 37). `SleepWakeObserver` owns the
     /// `NSWorkspace` tokens and tears them down in its own `deinit` when this property
@@ -70,7 +122,7 @@ final class AppCoordinator: ObservableObject {
 
     /// The settings load/save façade, bound to `storage.settingsFile` once storage is
     /// resolved. `nil` only if storage set-up failed (settings then stay at defaults).
-    private var settingsStore: SettingsStore?
+    var settingsStore: SettingsStore?
 
     /// Set when this launch is a duplicate that is standing down — stops the
     /// newcomer from installing its hotkey tap on the way out.
@@ -117,12 +169,17 @@ final class AppCoordinator: ObservableObject {
             Task { @MainActor in self?.showHotkeyStatus(status) }
         }
         hotkeys.onActivation = { [weak self] activation in
-            Task { @MainActor in self?.reflectHold(activation) }
+            Task { @MainActor in
+                self?.reflectHold(activation)
+                // PHASE 6: alongside the menubar mirror above, drive the marquee
+                // hotkey → Overlay → mock-driver loop (User Stories 2, 39, 40, 41).
+                self?.voiceSession.handle(activation)
+            }
         }
-        // P7: surface (or clear) the Accessibility fix-it as the tap install
+        // P7: surface (or clear) the Input Monitoring fix-it as the tap install
         // succeeds/fails (User Stories 15, 26). Delivered on the main actor.
-        hotkeys.onAccessibilityStatus = { [weak self] advice in
-            Task { @MainActor in self?.accessibilityFixIt = advice }
+        hotkeys.onInputMonitoringStatus = { [weak self] advice in
+            Task { @MainActor in self?.inputMonitoringFixIt = advice }
         }
         hotkeys.start(binder: HotkeyBinder(hotkeys: settings.hotkeys))
     }
@@ -138,7 +195,9 @@ final class AppCoordinator: ObservableObject {
 
     /// Reflect a push-to-talk hold in the menubar: down → a listening state that names
     /// the mode (command vs dictation, so the two hotkeys are visibly distinguished —
-    /// User Story 12); up → back to the idle status (User Story 11).
+    /// User Story 12); up → back to the idle status (User Story 11). This only covers
+    /// the physical hold; `reflectVoiceSessionPhase(_:)` below picks up from here for
+    /// Processing/ShowingResult, which have no corresponding hotkey edge.
     @MainActor
     private func reflectHold(_ activation: HotkeyActivation) {
         switch activation.phase {
@@ -147,6 +206,44 @@ final class AppCoordinator: ObservableObject {
         case .up:
             statusText = idleStatus
         }
+    }
+
+    /// Mirror `VoiceSessionCoordinator`'s processing/result/idle phases into
+    /// `statusText`, the single source the menubar reads (Phase 6 acceptance:
+    /// "Menubar and overlay both reflect the state" — previously only `reflectHold`'s
+    /// down/up edges touched `statusText`, so the menubar read idle throughout
+    /// Processing/ShowingResult even though the Overlay had moved on). Wired as
+    /// `voiceSession`'s `reportStatus` sink; `.listening` is never reported there —
+    /// `reflectHold` above already owns that text.
+    private func reflectVoiceSessionPhase(_ phase: VoiceSessionPhase) {
+        switch phase {
+        case .processing:
+            statusText = "⏳ Processing…"
+        case .result(let value):
+            statusText = "✅ \(value.summary)"
+        case .idle:
+            statusText = idleStatus
+        }
+    }
+
+    /// PHASE 6 (User Story 8): play the listen-start audio cue, gated on
+    /// `settings.indicators.audioCueOnListen`. `VoiceSessionCoordinator` calls this on
+    /// every accepted listen-start (fresh or PTT-restart) via the injected `playCue`
+    /// sink — the gate lives here because `VoiceSession` has no visibility into
+    /// `Configuration`'s `Settings`.
+    private func playListenCue() {
+        guard settings.indicators.audioCueOnListen else { return }
+        NSSound(named: "Tink")?.play()
+    }
+
+    /// Play the processing-start audio cue, gated on
+    /// `settings.indicators.audioCueOnProcessing` — mirrors `playListenCue()`.
+    /// `VoiceSessionCoordinator` calls this on every accepted "PTT up" (processing
+    /// begin) via the injected `playProcessingCue` sink, fixing the toggle that used
+    /// to persist a preference nothing read.
+    private func playProcessingCue() {
+        guard settings.indicators.audioCueOnProcessing else { return }
+        NSSound(named: "Tink")?.play()
     }
 
     /// Observe system sleep/wake so the app resumes in a sane state (PHASE 11; User
@@ -207,28 +304,26 @@ final class AppCoordinator: ObservableObject {
             })
         settingsStore = store
         settings = store.load()
+        // PHASE 9 (User Stories 29, 30): the Overlay's position + indicator-visibility
+        // must reflect the loaded settings from the very first show, not just after a
+        // later change through the Settings pane.
+        overlay.applyIndicatorSettings(settings.indicators)
+        // PHASE 10 (User Stories 16, 24): present onboarding — fresh or resumed —
+        // unless a prior launch already completed it.
+        setUpOnboarding()
     }
 
-    // MARK: - Settings mutation (persisted)
+    // MARK: - Settings mutation funnel (Standards: `settings` encapsulation)
 
-    /// Set the audio-cue-on-listen preference (User Story 8) and persist it. Publishing
-    /// `settings` re-renders the menubar; the atomic save makes the change survive a
-    /// relaunch. A no-op if the value is unchanged.
-    func setAudioCueOnListen(_ enabled: Bool) {
-        guard settings.indicators.audioCueOnListen != enabled else { return }
-        settings.indicators.audioCueOnListen = enabled
+    /// The sole sanctioned way any App code may mutate `settings`: apply `mutate` to
+    /// it — which can write it because this method lives in the file that declares
+    /// `private(set)` — then persist atomically via `persistSettings()`. Every setter
+    /// in `AppCoordinator+SettingsMutation.swift` and every settings write in
+    /// `AppCoordinator+Onboarding.swift` calls this instead of touching `settings`
+    /// directly, so a change can never be published without also being saved.
+    func updateSettings(_ mutate: (inout Settings) -> Void) {
+        mutate(&settings)
         persistSettings()
-    }
-
-    /// Atomically write the current settings. A failure is logged (User Story 38), not
-    /// fatal — the in-memory value still reflects the user's choice for this session.
-    private func persistSettings() {
-        guard let settingsStore else { return }
-        do {
-            try settingsStore.save(settings)
-        } catch {
-            appLog?.log("Failed to persist settings: \(error.localizedDescription)", level: .error)
-        }
     }
 
     // MARK: - Permission fix-it (P7; User Stories 15, 26, 27)
@@ -239,19 +334,15 @@ final class AppCoordinator: ObservableObject {
         NSWorkspace.shared.open(advice.deepLink)
     }
 
-    /// Re-read the Accessibility grant **prompt-free** (User Story 27) after the user
+    /// Re-read the Input Monitoring grant **prompt-free** (User Story 27) after the user
     /// returns from System Settings. If it's now granted, re-attempt the hotkey tap —
     /// which installs it and clears the fix-it (recovery). Otherwise refresh the hint so
     /// it stays visible and actionable.
-    ///
-    /// SEAM: the Overlay (a sibling phase, not in this worktree) will attach its own
-    /// fix-it affordance to the same `accessibilityFixIt` / `openFixIt` / `recheck` API —
-    /// no overlay code is referenced here so the phases stay independent.
-    func recheckAccessibility() {
-        if permissionGate.status(for: .accessibility).isUsable {
+    func recheckInputMonitoring() {
+        if permissionGate.status(for: .inputMonitoring).isUsable {
             hotkeys.retry()
         } else {
-            accessibilityFixIt = permissionGate.advice(for: .accessibility)
+            inputMonitoringFixIt = permissionGate.advice(for: .inputMonitoring)
         }
     }
 

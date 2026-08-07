@@ -60,8 +60,61 @@ enum SettingsCodec {
 
     /// Encode `Settings` to the bytes written to disk: pretty-printed with sorted keys
     /// so the file stays human-readable and diff-stable (User Stories 33/35).
-    static func encode(_ settings: Settings) throws -> Data {
-        try encoder.encode(settings)
+    ///
+    /// `existingData` is the raw bytes already on disk, if any (docs/05-lld.md §2.5:
+    /// `settings.json` is a single document holding ALL config blocks — this build
+    /// only *models* a subset of them). When present and parseable, any top-level key
+    /// the current `Settings` model doesn't represent — a block a later phase of this
+    /// build hasn't shipped yet, or one only a newer build understands — is copied
+    /// over verbatim, so a decode → re-encode round trip never destroys it. Every
+    /// modeled key (`schema_version`, `hotkeys`, `indicators`, …) always reflects
+    /// `settings`'s current value, overwriting whatever was on disk for that key —
+    /// including `schema_version`, so a file loaded pre-migration is rewritten at the
+    /// current version. `existingData` is merged **after** running it through the same
+    /// forward-migration chain `decode(_:)` uses, so a legacy key a migration step
+    /// already folded elsewhere (e.g. v0's flat `audio_cue`) doesn't resurface as a
+    /// stale duplicate. `existingData` being `nil` (first run) or unparseable (a
+    /// corrupt file) simply falls back to the modeled encoding alone — merging never
+    /// throws on account of `existingData`.
+    static func encode(_ settings: Settings, mergingUnknownTopLevelKeysFrom existingData: Data? = nil) throws -> Data {
+        let modeled = try encoder.encode(settings)
+        guard
+            let existingData,
+            let migratedExisting = migratedTopLevelObject(from: existingData),
+            let modeledObject = (try? JSONSerialization.jsonObject(with: modeled)) as? [String: Any]
+        else {
+            return modeled
+        }
+
+        var merged = migratedExisting
+        for (key, value) in modeledObject {
+            merged[key] = value
+        }
+
+        guard
+            let mergedData = try? JSONSerialization.data(
+                withJSONObject: merged, options: [.prettyPrinted, .sortedKeys])
+        else {
+            return modeled
+        }
+        return mergedData
+    }
+
+    /// Best-effort: `existingData`'s top-level JSON object, forward-migrated to the
+    /// current schema exactly as `decode(_:)` would — `nil` if the bytes aren't a
+    /// parseable JSON object at all (corrupt / not JSON). Unlike `decode(_:)`, a
+    /// version newer than this build understands isn't an error here: `migrate`
+    /// leaves such an object untouched aside from stamping the version, which is
+    /// exactly the "preserve what I don't understand" behaviour `encode` wants.
+    private static func migratedTopLevelObject(from existingData: Data) -> [String: Any]? {
+        guard
+            let parsed = try? JSONSerialization.jsonObject(with: existingData),
+            let object = parsed as? [String: Any]
+        else {
+            return nil
+        }
+        let version = (object["schema_version"] as? Int) ?? 0
+        return SettingsMigrator.migrate(object, from: version)
     }
 
     private static let decoder = JSONDecoder()

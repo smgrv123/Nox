@@ -2,6 +2,7 @@ import AVFoundation
 import ApplicationServices
 import CoreGraphics
 import EventKit
+import IOKit.hid
 import Permissions
 
 /// The thin **effectful shell** behind `PermissionGate` (docs/05-lld.md §8): it performs
@@ -25,6 +26,14 @@ struct SystemPermissionReader {
             return AXIsProcessTrusted() ? .granted : .denied
         case .screenRecording:
             return CGPreflightScreenCaptureAccess() ? .granted : .denied
+        case .inputMonitoring:
+            // The listen-only CGEventTap (Push-to-Talk) requires Input Monitoring
+            // (kTCCServiceListenEvent), queried prompt-free via IOHIDCheckAccess.
+            switch IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) {
+            case kIOHIDAccessTypeGranted: return .granted
+            case kIOHIDAccessTypeDenied: return .denied
+            default: return .notDetermined  // kIOHIDAccessTypeUnknown ⇒ not yet determined
+            }
         case .calendar:
             return Self.map(EKEventStore.authorizationStatus(for: .event))
         }

@@ -25,8 +25,9 @@ public struct Settings: Equatable, Sendable, Codable {
     /// The schema version this build reads and writes. Bumped whenever a phase adds
     /// or renames a field; that phase also appends the matching `SettingsMigration`
     /// step. **v2** (Phase 5) added the `hotkeys` block on top of the v1 `indicators`
-    /// baseline (§2.5).
-    public static let currentSchemaVersion = 2
+    /// baseline (§2.5). **v3** (Phase 10) added `privacy` (the one-time
+    /// network-utilities disclosure ack) and `onboarding` (first-run resumability).
+    public static let currentSchemaVersion = 3
 
     /// The document's schema version. Always normalised to `currentSchemaVersion`
     /// in memory (migration runs on load), so an in-memory value never lags the file.
@@ -42,10 +43,27 @@ public struct Settings: Equatable, Sendable, Codable {
     /// (the audio cue) through a temporary menubar toggle.
     public var indicators: Indicators
 
-    public init(hotkeys: Hotkeys = Hotkeys(), indicators: Indicators = Indicators()) {
+    /// Privacy-related persisted flags (§2.5 `privacy`; Phase 10). P1 models only
+    /// the one-time keyless-utility-calls disclosure ack (User Story 22).
+    public var privacy: Privacy
+
+    /// Onboarding's persisted first-run progress (Phase 10; User Story 24 —
+    /// resumability). `completed` gates whether onboarding shows at all;
+    /// `resumeStep` is the last step reached, read back by
+    /// `Onboarding.OnboardingFlow.init(resumeAt:)` on the next launch.
+    public var onboarding: OnboardingProgress
+
+    public init(
+        hotkeys: Hotkeys = Hotkeys(),
+        indicators: Indicators = Indicators(),
+        privacy: Privacy = Privacy(),
+        onboarding: OnboardingProgress = OnboardingProgress()
+    ) {
         self.schemaVersion = Settings.currentSchemaVersion
         self.hotkeys = hotkeys
         self.indicators = indicators
+        self.privacy = privacy
+        self.onboarding = onboarding
     }
 
     /// The safe defaults used for a missing or unreadable file (User Story 38: a
@@ -56,6 +74,8 @@ public struct Settings: Equatable, Sendable, Codable {
         case schemaVersion = "schema_version"
         case hotkeys
         case indicators
+        case privacy
+        case onboarding
     }
 
     public init(from decoder: Decoder) throws {
@@ -65,8 +85,11 @@ public struct Settings: Equatable, Sendable, Codable {
         self.schemaVersion = Settings.currentSchemaVersion
         self.hotkeys = try container.decodeIfPresent(Hotkeys.self, forKey: .hotkeys) ?? Hotkeys()
         self.indicators = try container.decodeIfPresent(Indicators.self, forKey: .indicators) ?? Indicators()
+        self.privacy = try container.decodeIfPresent(Privacy.self, forKey: .privacy) ?? Privacy()
+        self.onboarding =
+            try container.decodeIfPresent(OnboardingProgress.self, forKey: .onboarding) ?? OnboardingProgress()
     }
-    // `encode(to:)` is synthesised from `CodingKeys` — writes `schema_version` + `hotkeys` + `indicators`.
+    // `encode(to:)` is synthesised from `CodingKeys` — writes every block above.
 }
 
 extension Settings {
@@ -225,5 +248,64 @@ extension Settings {
     public enum OverlayPosition: String, Equatable, Sendable, Codable, CaseIterable {
         case topCenter = "top_center"
         case bottomCenter = "bottom_center"
+    }
+
+    /// Privacy-related persisted flags (§2.5 `privacy`; Phase 10). P1 models only
+    /// `network_utilities_disclosed` — the one-time ack that Onboarding's keyless
+    /// utility-calls disclosure (Weather/Open-Meteo, Currency/Frankfurter) has been
+    /// shown (User Story 22; docs/05-lld.md §8: "the disclosure flag persists in
+    /// `settings.privacy.network_utilities_disclosed`"). §2.5's other `privacy`
+    /// sub-fields (`transcripts_retention`, `wipe_scope_default`) are unmodeled — P1's
+    /// wipe scope is fixed (`Persistence.HistoryWipe`), not user-configurable yet.
+    public struct Privacy: Equatable, Sendable, Codable {
+        /// Whether Onboarding's one-time keyless-utility-calls disclosure has been
+        /// acknowledged. Once `true`, the disclosure step must never show again.
+        public var networkUtilitiesDisclosed: Bool
+
+        public init(networkUtilitiesDisclosed: Bool = false) {
+            self.networkUtilitiesDisclosed = networkUtilitiesDisclosed
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case networkUtilitiesDisclosed = "network_utilities_disclosed"
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            self.networkUtilitiesDisclosed =
+                try container.decodeIfPresent(Bool.self, forKey: .networkUtilitiesDisclosed) ?? false
+        }
+    }
+
+    /// Onboarding's persisted first-run progress (Phase 10; User Story 24 —
+    /// resumability). Not one of the original §2.5 sample's named blocks, but
+    /// follows the same tolerant-decode idiom as every block above: `completed`
+    /// gates whether onboarding shows at all; `resumeStep` is the last step reached.
+    public struct OnboardingProgress: Equatable, Sendable, Codable {
+        /// Whether the first-run walkthrough has been completed. While `false`, the
+        /// App layer presents the onboarding window on launch.
+        public var completed: Bool
+
+        /// The `Onboarding.OnboardingStep` raw value to resume at. Stored as a plain
+        /// `String` — `Configuration` does not depend on the `Onboarding` module —
+        /// so an unrecognized value (a future build's new step, or a hand-edited
+        /// file) is simply reset to `"welcome"` by the reader rather than crashing.
+        public var resumeStep: String
+
+        public init(completed: Bool = false, resumeStep: String = "welcome") {
+            self.completed = completed
+            self.resumeStep = resumeStep
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case completed
+            case resumeStep = "resume_step"
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            self.completed = try container.decodeIfPresent(Bool.self, forKey: .completed) ?? false
+            self.resumeStep = try container.decodeIfPresent(String.self, forKey: .resumeStep) ?? "welcome"
+        }
     }
 }

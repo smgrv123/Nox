@@ -19,6 +19,8 @@ final class PermissionGateTests: XCTestCase {
         XCTAssertEqual(
             Permission.accessibility.settingsDeepLink.absoluteString, "\(base)?Privacy_Accessibility")
         XCTAssertEqual(
+            Permission.inputMonitoring.settingsDeepLink.absoluteString, "\(base)?Privacy_ListenEvent")
+        XCTAssertEqual(
             Permission.screenRecording.settingsDeepLink.absoluteString, "\(base)?Privacy_ScreenCapture")
         XCTAssertEqual(Permission.calendar.settingsDeepLink.absoluteString, "\(base)?Privacy_Calendars")
     }
@@ -27,8 +29,19 @@ final class PermissionGateTests: XCTestCase {
 
     func testOnlyCalendarIsOptional() {
         XCTAssertTrue(Permission.calendar.isOptional)
-        for permission in [Permission.microphone, .accessibility, .screenRecording] {
+        for permission in [Permission.microphone, .accessibility, .inputMonitoring, .screenRecording] {
             XCTAssertFalse(permission.isOptional, "\(permission) is required, not optional")
+        }
+    }
+
+    // MARK: - Relaunch-gated grants (Screen Recording only — macOS grant-visibility bug)
+
+    func testOnlyScreenRecordingRequiresARelaunchToObserveItsGrant() {
+        XCTAssertTrue(Permission.screenRecording.grantTakesEffectAfterRelaunch)
+        for permission in [Permission.microphone, .accessibility, .inputMonitoring, .calendar] {
+            XCTAssertFalse(
+                permission.grantTakesEffectAfterRelaunch,
+                "\(permission)'s grant is observable in-session and must not be relaunch-gated")
         }
     }
 
@@ -36,7 +49,8 @@ final class PermissionGateTests: XCTestCase {
 
     func testDegradationMapMatchesTheLLDTable() {
         XCTAssertEqual(Permission.microphone.gatedFeatures, [.commandMode, .dictationMode, .wakeWord])
-        XCTAssertEqual(Permission.accessibility.gatedFeatures, [.textInsertion, .hotkeyCapture])
+        XCTAssertEqual(Permission.accessibility.gatedFeatures, [.textInsertion])
+        XCTAssertEqual(Permission.inputMonitoring.gatedFeatures, [.hotkeyCapture])
         XCTAssertEqual(Permission.screenRecording.gatedFeatures, [.screenQA])
         XCTAssertEqual(Permission.calendar.gatedFeatures, [.calendarSkill])
     }
@@ -153,17 +167,18 @@ final class PermissionGateTests: XCTestCase {
             permission == .accessibility ? current : .granted
         })
         XCTAssertNotNil(gate.advice(for: .accessibility))
-        XCTAssertFalse(gate.isEnabled(.hotkeyCapture))
+        XCTAssertFalse(gate.isEnabled(.textInsertion))
 
         current = .granted
         XCTAssertNil(gate.advice(for: .accessibility))
-        XCTAssertTrue(gate.isEnabled(.hotkeyCapture))
+        XCTAssertTrue(gate.isEnabled(.textInsertion))
     }
 
     func testDegradedPermissionsListedInCanonicalOrder() {
         let gate = PermissionGate(statuses: [
             .microphone: .granted,
             .accessibility: .denied,
+            .inputMonitoring: .granted,
             .screenRecording: .granted,
             .calendar: .notDetermined,
         ])

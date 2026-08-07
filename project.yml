@@ -39,6 +39,13 @@ targets:
       # P5: pure hotkey binding logic behind App/HotkeyManager.swift.
       - package: AideModules
         product: Hotkeys
+      # P6: the marquee hotkey → Overlay → mock-driver loop (the VoiceSessionDriver seam).
+      - package: AideModules
+        product: VoiceSession
+      # P10: the first-run onboarding flow coordinator (welcome → tier → permissions
+      # → disclosure → hotkeys → guided first success → summary).
+      - package: AideModules
+        product: Onboarding
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.aide.Aide
@@ -52,6 +59,16 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_NSHumanReadableCopyright: ""
         INFOPLIST_KEY_NSMicrophoneUsageDescription: "Aide transcribes your voice locally on this Mac. Audio never leaves the machine."
+        # Required before the listen-only CGEventTap (Push-to-Talk) can capture the hotkey.
+        INFOPLIST_KEY_NSInputMonitoringUsageDescription: "Aide listens for your push-to-talk hotkey so you can talk to it from any app. This stays on your Mac."
+        # Required before EventKit's full-access request can run (the optional Calendar skill).
+        INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription: "Aide reads your calendar only to answer your schedule questions. This stays on your Mac."
+        # Link the app code directly into the main executable instead of Xcode's separate
+        # `Aide.debug.dylib`. The debug-dylib layout runs the real code from a nested dylib
+        # whose code identity churns on every rebuild, which destabilizes TCC permission
+        # grants (Input Monitoring / Accessibility) — the app has to be re-granted after each
+        # build. A single self-contained binary keeps a stable identity so grants persist.
+        ENABLE_DEBUG_DYLIB: NO
         # Signing / notarization posture (locked decision #2): hardened runtime ON from day one.
         ENABLE_HARDENED_RUNTIME: YES
         CODE_SIGN_STYLE: Automatic

@@ -60,6 +60,24 @@ enum SettingsMigrator {
                 migrated["schema_version"] = 2
                 return migrated
             },
+            // v2 → v3 (Phase 10). v3 (LLD §2.5, §8) adds the `privacy` block (the
+            // one-time network-utilities disclosure ack) and `onboarding` (first-run
+            // resumability). A pre-v3 file has neither, so we write the same safe
+            // defaults `Settings.Privacy()` / `Settings.OnboardingProgress()` would —
+            // not-yet-disclosed, not-yet-onboarded, resuming at "welcome". Existing
+            // `hotkeys`/`indicators` are left untouched — this step only adds the two
+            // new blocks, so nothing already on disk is lost.
+            SettingsMigration(from: 2, to: 3) { v2 in
+                var migrated = v2
+                if migrated["privacy"] == nil {
+                    migrated["privacy"] = ["network_utilities_disclosed": false]
+                }
+                if migrated["onboarding"] == nil {
+                    migrated["onboarding"] = ["completed": false, "resume_step": "welcome"]
+                }
+                migrated["schema_version"] = 3
+                return migrated
+            },
         ]
     }
 

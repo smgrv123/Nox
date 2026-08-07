@@ -74,9 +74,14 @@ public struct SettingsStore {
         }
     }
 
-    /// Atomically persist the settings (temp-sibling + `rename(2)`, §2.7).
+    /// Atomically persist the settings (temp-sibling + `rename(2)`, §2.7). Any
+    /// top-level JSON block already on disk that the current `Settings` model doesn't
+    /// represent is preserved verbatim (§2.5: `settings.json` is one document holding
+    /// ALL config blocks, not just the ones this build models) — see
+    /// `SettingsCodec.encode(_:mergingUnknownTopLevelKeysFrom:)`.
     public func save(_ settings: Settings) throws {
-        try writer.write(try SettingsCodec.encode(settings), to: fileURL)
+        let existing = try? Data(contentsOf: fileURL)
+        try writer.write(try SettingsCodec.encode(settings, mergingUnknownTopLevelKeysFrom: existing), to: fileURL)
     }
 
     /// Move an unreadable file aside so its contents are preserved for inspection and

@@ -3,9 +3,10 @@ import SwiftUI
 /// Menubar-only entry point (no Dock icon — `LSUIElement` is set in project.yml).
 ///
 /// A thin SwiftUI shell: it declares the two surfaces (the `MenuBarExtra` menu and
-/// an empty Settings window) and hands lifecycle ownership to `AppCoordinator` via
-/// the `AppDelegate` seam. Everything with behavior — single-instance, the hotkey
-/// tap, the published status — lives in the coordinator, not here.
+/// the Settings window, hosted by `SettingsRootView` — App/Settings/) and hands
+/// lifecycle ownership to `AppCoordinator` via the `AppDelegate` seam. Everything
+/// with behavior — single-instance, the hotkey tap, the published status — lives
+/// in the coordinator, not here.
 /// See docs/04-hld.md §13 (Overlay & Menubar UI Subsystem).
 @main
 struct AideApp: App {
@@ -17,10 +18,13 @@ struct AideApp: App {
         }
         .menuBarExtraStyle(.menu)
 
-        // Settings framework + P1 panes land in later phases; PHASE 11 wires the
-        // coordinator through so the "Wipe all history" pane can trigger the wipe.
+        // PHASE 8: the Settings framework. `SettingsRootView` hosts a registered
+        // list of `SettingsPane`s (App/Settings/) — Permissions today, with later
+        // phases (e.g. Phase 9's hotkey/overlay options) appending more without
+        // touching this scene or the host view. The coordinator is threaded through
+        // so the Data pane can trigger `requestWipeAllHistory()` (Phase 11).
         Settings {
-            SettingsView(coordinator: appDelegate.coordinator)
+            SettingsRootView(coordinator: appDelegate.coordinator)
         }
     }
 }

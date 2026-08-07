@@ -20,4 +20,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         coordinator.applicationDidFinishLaunching()
     }
+
+    /// PHASE 10 (User Story 20): the moment the user switches back to Aide — e.g.
+    /// after granting a permission in System Settings — re-check the onboarding
+    /// flow's current permission step so it auto-advances without waiting for the
+    /// poll timer.
+    func applicationDidBecomeActive(_ notification: Notification) {
+        coordinator.applicationDidBecomeActive()
+    }
 }
