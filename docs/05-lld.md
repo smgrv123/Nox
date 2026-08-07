@@ -1229,7 +1229,8 @@ macOS permission UX is load-bearing (PRD §10). Each permission is detected inde
 | Permission | TCC / API | Gates | Detect (no prompt) | Prompt / deep-link |
 |---|---|---|---|---|
 | **Microphone** | `AVCaptureDevice.authorizationStatus(for: .audio)` | All STT (**Command Mode**, **Dictation Mode**, Wake Word) | status enum | `requestAccess`; deep-link `x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone` |
-| **Accessibility (AX)** | `AXIsProcessTrustedWithOptions` | **Text Insertion** (AX path), **Hotkey** event tap (CGEventTap) | `AXIsProcessTrusted()` | `…?Privacy_Accessibility` (cannot programmatically prompt; must guide) |
+| **Input Monitoring** | TCC `kTCCServiceListenEvent`; `IOHIDCheckAccess(kIOHIDRequestTypeListenEvent)` | **Hotkey** — listen-only `CGEventTap` (`kCGEventTapOptionListenOnly`) requires Input Monitoring on macOS ≥ 10.15, **not** Accessibility | `IOHIDCheckAccess(...) == kIOHIDAccessTypeGranted` (bool) | `IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)` (macOS shows "Quit & Reopen" — the grant is observed only **after relaunch**); deep-link `…?Privacy_ListenEvent` |
+| **Accessibility (AX)** | `AXIsProcessTrustedWithOptions` | **Text Insertion** (AX path) | `AXIsProcessTrusted()` | `…?Privacy_Accessibility` (cannot programmatically prompt; must guide) |
 | **Screen Recording** | `CGPreflightScreenCaptureAccess()` / `CGRequestScreenCaptureAccess()` | **Screen Q&A** (`screencapture`) | preflight bool | `…?Privacy_ScreenCapture` |
 | **Calendar / EventKit** | `EKEventStore.authorizationStatus(for: .event)` | Calendar-read skill (optional/skippable) | status enum | `requestFullAccessToEvents`; `…?Privacy_Calendars` |
 
@@ -1259,6 +1260,7 @@ Every failure surfaces a **human-readable state** — never silent (NFR). One `A
 | **STT** | Model missing/corrupt | `.stt(.modelUnavailable)` | "Speech model not loaded" + re-download affordance |
 | STT | Pre-gate reject (§4.1) | `.stt(.lowConfidence)` | "I didn't catch that — try again" (re-ask; not an error toast) |
 | STT | Mic denied | `.permission(.microphone)` | Fix-it hint + deep-link (§8) |
+| **Hotkey** | Input Monitoring denied | `.permission(.inputMonitoring)` | Fix-it hint + deep-link (`…?Privacy_ListenEvent`, §8); grant takes effect only after relaunch ("Quit & Reopen") |
 | **Sidecar** | Won't launch / unhealthy | `.sidecar(.unavailable)` | "Assistant model is starting…"; auto-restart backoff (§5.1); persistent if `.failed` |
 | Sidecar | Health flaps mid-request | `.sidecar(.timeout)` | Retry once; then surface + restart |
 | **Router** | Malformed JSON despite grammar | `.router(.malformedOutput)` | One repair retry (re-ask model); then prompt-back |

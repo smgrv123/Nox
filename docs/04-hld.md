@@ -721,7 +721,7 @@ macOS permission UX is load-bearing: a broken first-run kills the app. The flow 
 2. **RAM detection → proposed Tier → confirm/override** (via `ModelManager`).
 3. **Model downloads** with clear progress + sizes (~2–7GB total; the one unavoidable wait). App stays responsive; downloads **resumable**.
 4. **Permission walkthrough, one at a time**, each with a plain-language "why," each **deep-linking** to the exact System Settings pane, with the app **detecting the grant and auto-advancing**:
-   - Microphone (STT) · Accessibility (Text Insertion, hotkeys) · Screen Recording (Screen Q&A) · Calendar (schedule queries — optional/skippable).
+   - Microphone (STT) · Input Monitoring (global hotkey) · Accessibility (Text Insertion) · Screen Recording (Screen Q&A) · Calendar (schedule queries — optional/skippable).
    - Also discloses **once** the two keyless utility network calls (weather Open-Meteo, currency Frankfurter) as the only implicit network traffic besides model downloads.
 5. **Hotkey setup** (sensible defaults offered).
 6. **Guided first success** ("Hold ⌥Space and say: *open Safari*"), then a first Dictation into a text field.
@@ -733,6 +733,7 @@ flowchart LR
   RAM --> DL[Resumable model download UI]
   DL --> PERM[TCC walkthrough one-at-a-time]
   PERM -->|Mic| PERM
+  PERM -->|Input Monitoring| PERM
   PERM -->|Accessibility| PERM
   PERM -->|Screen Recording| PERM
   PERM -->|Calendar optional| PERM
