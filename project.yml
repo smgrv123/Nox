@@ -46,6 +46,14 @@ targets:
       # → disclosure → hotkeys → guided first success → summary).
       - package: AideModules
         product: Onboarding
+      # P2a: the pure STT heart (value types + STTEngine seam + mock).
+      - package: AideModules
+        product: SpeechToText
+      # P2a: the app-linked native shell — the whisper.cpp C-bridge engine. Depending on
+      # it mirrors the pinned whisper xcframework (a SwiftPM binaryTarget) into the app,
+      # so it links/embeds in Aide.app (docs/native-deps.md).
+      - package: AideModules
+        product: WhisperSTTEngine
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.aide.Aide

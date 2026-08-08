@@ -24,6 +24,10 @@ let package = Package(
         .library(name: "Hotkeys", targets: ["Hotkeys"]),
         .library(name: "VoiceSession", targets: ["VoiceSession"]),
         .library(name: "Onboarding", targets: ["Onboarding"]),
+        // P2a · Speech-to-Text. `SpeechToText` is the pure heart (value types, the
+        // `STTEngine` seam + mock); `WhisperSTTEngine` is the app-linked native shell.
+        .library(name: "SpeechToText", targets: ["SpeechToText"]),
+        .library(name: "WhisperSTTEngine", targets: ["WhisperSTTEngine"]),
     ],
     targets: [
         .target(name: "AideCore"),
@@ -88,6 +92,36 @@ let package = Package(
             name: "Onboarding",
             dependencies: ["AideCore", "Permissions"]
         ),
+        // P2a · Speech-to-Text — the pure, headless heart (docs/05-lld.md §3.2, §4.1):
+        // the `Transcription`/`Segment`/`LanguageHint` value types, the `STTEngine`
+        // seam, `MockSTTEngine`, `SegmentPreGate`, and (later phases) `SttTierPolicy`,
+        // `PCMRingBuffer`. Links NO native binary — whisper.cpp stays out of this
+        // module and out of the fast `swift test` gate (the P1 `CGEventTap` precedent).
+        // Depends only on `AideCore` for the shared `VoiceSessionMode` (command = strict /
+        // dictation = lenient) the Pre-Gate is parameterized by — the canonical vocabulary,
+        // not a parallel enum.
+        .target(
+            name: "SpeechToText",
+            dependencies: ["AideCore"]
+        ),
+        // whisper.cpp as a prebuilt, SHA-256-pinned xcframework (locked native-binary
+        // decision; docs/native-deps.md). SwiftPM downloads + verifies it against the
+        // checksum below — the only pin that gates the native surface. Consumed solely
+        // by `WhisperSTTEngine`; never by the pure `SpeechToText` module.
+        .binaryTarget(
+            name: "whisper",
+            url: "https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.2/whisper-v1.9.2-xcframework.zip",
+            checksum: "af74fed13ea7f2d5ca2a39d9f58ec177713fafd7cab63aef4e27b79f3ceca80b"
+        ),
+        // The effectful C-bridge conformer of `STTEngine` (specs/P2a §"Effectful
+        // shells"): links the whisper xcframework and runs the real in-process decode.
+        // An **app-linked** target (the App/ Xcode target depends on it via project.yml),
+        // kept out of the pure module. Its only test is the opt-in, env-gated headless
+        // integration check (`WhisperSTTEngineTests`), which skips without a placed model.
+        .target(
+            name: "WhisperSTTEngine",
+            dependencies: ["SpeechToText", "whisper"]
+        ),
         .testTarget(
             name: "AppLifecycleTests",
             dependencies: ["AppLifecycle"]
@@ -123,6 +157,20 @@ let package = Package(
         .testTarget(
             name: "OnboardingTests",
             dependencies: ["Onboarding", "Permissions"]
+        ),
+        // Pure, headless unit suite for the STT value types + mock (no native binary).
+        .testTarget(
+            name: "SpeechToTextTests",
+            dependencies: ["SpeechToText", "AideCore"]
+        ),
+        // Opt-in headless integration check for the real whisper decode: a committed
+        // sample WAV → `WhisperSTTEngine` → assert the transcript + populated per-segment
+        // probability fields. Gated by AIDE_RUN_STT_INTEGRATION=1 + a manually-placed
+        // model, so it skips gracefully on the normal gate (specs/P2a §"Testing").
+        .testTarget(
+            name: "WhisperSTTEngineTests",
+            dependencies: ["WhisperSTTEngine", "SpeechToText", "AideCore"],
+            resources: [.copy("Fixtures/jfk.wav")]
         ),
     ]
 )
