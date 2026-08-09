@@ -54,6 +54,11 @@ targets:
       # so it links/embeds in Aide.app (docs/native-deps.md).
       - package: AideModules
         product: WhisperSTTEngine
+      # P2a Phase 3: the real VoiceSessionDriver conformer (capture → decode → Pre-Gate),
+      # swapped in for MockVoiceSessionDriver. The App layer injects the concrete
+      # WhisperSTTEngine + AudioCapture (App/AudioCapture.swift) into it.
+      - package: AideModules
+        product: STTVoiceSession
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.aide.Aide

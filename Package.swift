@@ -28,6 +28,7 @@ let package = Package(
         // `STTEngine` seam + mock); `WhisperSTTEngine` is the app-linked native shell.
         .library(name: "SpeechToText", targets: ["SpeechToText"]),
         .library(name: "WhisperSTTEngine", targets: ["WhisperSTTEngine"]),
+        .library(name: "STTVoiceSession", targets: ["STTVoiceSession"]),
     ],
     targets: [
         .target(name: "AideCore"),
@@ -122,6 +123,16 @@ let package = Package(
             name: "WhisperSTTEngine",
             dependencies: ["SpeechToText", "whisper"]
         ),
+        // P2a · the real `VoiceSessionDriver` conformer (specs/P2a §"Effectful shells"):
+        // orchestrates capture → decode → Pre-Gate on `begin`/`end`. Depends only on the
+        // `STTEngine` + `AudioCaptureBuffer` protocols (SpeechToText) and `AideCore`'s
+        // seam — NEVER the concrete `WhisperSTTEngine` or the AVAudioEngine tap — so its
+        // orchestration is unit-tested headlessly with `MockSTTEngine` + a fake capture.
+        // The native engine + mic shell are injected by the App layer in production.
+        .target(
+            name: "STTVoiceSession",
+            dependencies: ["AideCore", "SpeechToText"]
+        ),
         .testTarget(
             name: "AppLifecycleTests",
             dependencies: ["AppLifecycle"]
@@ -171,6 +182,13 @@ let package = Package(
             name: "WhisperSTTEngineTests",
             dependencies: ["WhisperSTTEngine", "SpeechToText", "AideCore"],
             resources: [.copy("Fixtures/jfk.wav")]
+        ),
+        // Headless orchestration suite for the real driver: injected `MockSTTEngine` + a
+        // fake `AudioCaptureBuffer` + the real `SegmentPreGate` prove pass → transcript +
+        // result, fail → re-ask, and cancel → suppressed — no mic, no native binary.
+        .testTarget(
+            name: "STTVoiceSessionTests",
+            dependencies: ["STTVoiceSession", "SpeechToText", "AideCore"]
         ),
     ]
 )

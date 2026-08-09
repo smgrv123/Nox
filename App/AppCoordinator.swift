@@ -7,7 +7,10 @@ import Onboarding
 import Overlay
 import Permissions
 import Persistence
+import STTVoiceSession
+import SpeechToText
 import VoiceSession
+import WhisperSTTEngine
 import os
 
 /// Owns Aide's app lifecycle: single-instance enforcement at launch, the
@@ -60,11 +63,24 @@ final class AppCoordinator: ObservableObject {
     /// can drive it (see `MenubarMenu`).
     let overlay = OverlayController()
 
-    /// PHASE 6 (the marquee E2E loop; User Stories 2, 8, 39, 40, 41): the
-    /// `AideCore.VoiceSessionDriver` seam's P1 conformer. A real STT/routing engine
-    /// (P2/P4) swaps in later by conforming to the same protocol — nothing else in
-    /// this file changes (the seam property specs/P1 calls out).
-    private let voiceDriver = MockVoiceSessionDriver()
+    /// P2a Phase 3 (the seam paying off; User Stories 1, 6, 22): the **real** STT-backed
+    /// `AideCore.VoiceSessionDriver`, swapped in for `MockVoiceSessionDriver` with no change
+    /// to `VoiceSessionCoordinator`/Overlay. Drives `AudioCapture` → `WhisperSTTEngine`
+    /// (in-process whisper.cpp) → `SegmentPreGate`. Constructing it opens nothing (mic opens
+    /// only on a hold; model loads lazily; an absent model fails safe, not a crash).
+    private let voiceDriver = STTVoiceSessionDriver(
+        engine: WhisperSTTEngine(modelURL: AppCoordinator.sttModelURL),
+        capture: AudioCapture(),
+        preGate: SegmentPreGate(thresholds: .provisional))
+
+    /// The manually-placed Whisper model path (Phase 1 convention; Phase 5 provisioning
+    /// retires it) — resolved eagerly so `voiceDriver` can be a stored `let`.
+    private static var sttModelURL: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appending(path: "Aide", directoryHint: .isDirectory)
+            .appending(path: "models", directoryHint: .isDirectory)
+            .appending(path: "ggml-base.en.bin")
+    }
 
     /// Orchestrates hotkey → Overlay → `voiceDriver` → Overlay (docs/04-hld.md §13,
     /// docs/05-lld.md §10). `lazy` because its `emit` sink is `overlay.send` and its
