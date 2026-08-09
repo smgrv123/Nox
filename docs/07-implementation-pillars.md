@@ -118,5 +118,6 @@ Each pillar gets, in order:
 | Pillar | Status |
 |---|---|
 | P1 Platform & Shell | Tracer bullet started (menubar app, hotkey tap, permission deep-link) |
+| P2 Inference Core | P2a · Speech-to-Text shipped (all 5 phases); P2b · LLM Runtime in progress (`plans/P2b-llm-runtime.md`) |
 | P3 Safety Guard | `DangerousCommandScanner` module + 10 passing tests |
-| P2, P4, P5, P6, P7 | Not started |
+| P4, P5, P6, P7 | Not started |
