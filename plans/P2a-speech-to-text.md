@@ -118,11 +118,11 @@ Close the vertical: the app provisions its own model. Add the `ModelDownloader` 
 
 ### Acceptance criteria
 
-- [ ] `ModelDownloader` performs a resumable ranged GET, streams to disk, and hashes-as-it-streams; on interruption (quit/sleep/dropped network) a re-run **resumes** from the recorded offset rather than restarting.
-- [ ] Onboarding tier-confirm → RAM-appropriate model downloads → verifies → `WhisperSTTEngine` loads from the provisioned path (no manual placement).
-- [ ] A corrupt/mismatched download is caught by verification and surfaced (not used); an already-present verified model is **skipped** (instant on later launches).
-- [ ] Download **progress** and an actionable **failure** message are shown; a missing/undownloaded model surfaces a **"speech model not ready"** state, not a crash.
-- [ ] Model blob + `.download-state.json` land under the user-discoverable models directory with a working reveal-in-Finder affordance; `.download-state.json` mutations are atomic.
-- [ ] The download URL + checksum are the only network-facing constants; no other egress.
-- [ ] **Full-vertical demo:** on a fresh machine — confirm tier → auto-download + verify → hold hotkey + speak → real transcript in the Overlay; plus the opt-in integration check (sample WAV → transcript + Pre-Gate verdict) green.
-- [ ] Per-phase gate green (`just check`, `just app`, 0 lint warnings).
+- [x] `ModelDownloader` performs a resumable ranged GET, streams to disk, and hashes-as-it-streams; on interruption (quit/sleep/dropped network) a re-run **resumes** from the recorded offset rather than restarting. Proven headlessly against a `URLProtocol` stub fixture (`ModelDownloaderTests`) — no real network, no production model.
+- [x] Onboarding tier-confirm → RAM-appropriate model downloads → verifies → `WhisperSTTEngine` loads from the provisioned path (no manual placement). Wired in `App/Onboarding/OnboardingTierStep.swift` + `App/AppCoordinator+ModelProvisioning.swift`.
+- [x] A corrupt/mismatched download is caught by verification and surfaced (not used); an already-present verified model is **skipped** (instant on later launches). `ModelProvisionerTests` + `ModelDownloaderTests`.
+- [x] Download **progress** and an actionable **failure** message are shown; a missing/undownloaded model surfaces a **"speech model not ready"** state, not a crash. `OnboardingTierStep`'s `.downloading`/`.failed` rendering; `STTVoiceSessionDriver.modelNotReadySummary` at use-time.
+- [x] Model blob + `.download-state.json` land under the user-discoverable models directory with a working reveal-in-Finder affordance; `.download-state.json` mutations are atomic. `AppCoordinator.revealModelsFolderInFinder()` (Settings → Data); atomicity via `ModelProvisioning.DownloadStateStore`/`Persistence.AtomicFileWriter`, asserted in `ModelDownloaderTests`.
+- [x] The download URL + checksum are the only network-facing constants; no other egress. `ModelDownloader.huggingFaceURL(for:)` + each `ModelDescriptor.expectedSHA256`.
+- [ ] **Full-vertical demo:** on a fresh machine — confirm tier → auto-download + verify → hold hotkey + speak → real transcript in the Overlay; plus the opt-in integration check (sample WAV → transcript + Pre-Gate verdict) green. **Manual — not run by the implementing agent** (guardrail: never download a production model in-session); steps documented in `docs/native-deps.md` §"Manual full-vertical test" for the user to run.
+- [x] Per-phase gate green (`just check`, `just app`, 0 lint warnings).

@@ -78,6 +78,17 @@ enum SettingsMigrator {
                 migrated["schema_version"] = 3
                 return migrated
             },
+            // v3 → v4 (P2a Phase 5). v4 adds the top-level `stt_model_tier` scalar (the
+            // onboarding-confirmed Whisper Tier). A pre-v4 file has no such key; leaving it
+            // absent is itself the correct default (`nil` = "not yet confirmed") — `Settings`'
+            // tolerant decoder already reads a missing key as `nil` — so this step only bumps
+            // the version stamp, mirroring how a genuinely no-op field addition still gets a
+            // documented migration hop rather than silently riding along on v3's shape.
+            SettingsMigration(from: 3, to: 4) { v3 in
+                var migrated = v3
+                migrated["schema_version"] = 4
+                return migrated
+            },
         ]
     }
 

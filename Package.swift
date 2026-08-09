@@ -32,6 +32,9 @@ let package = Package(
         // P2a/P2b · the shared, pure model-provisioning core (descriptor,
         // verification, resume math, download-state codec, models directory).
         .library(name: "ModelProvisioning", targets: ["ModelProvisioning"]),
+        // P2a/P2b Phase 5 · the resumable-download effectful shell (the one allowed
+        // network egress). Conforms to `ModelProvisioning.ModelDownloading`.
+        .library(name: "ModelDownloader", targets: ["ModelDownloader"]),
     ],
     targets: [
         .target(name: "AideCore"),
@@ -147,6 +150,17 @@ let package = Package(
             name: "STTVoiceSession",
             dependencies: ["AideCore", "SpeechToText"]
         ),
+        // P2a/P2b Phase 5 · the resumable ranged-HTTP-GET shell (specs/P2a
+        // §"Effectful shells"; docs/05-lld.md §2.7): the ONE allowed network egress.
+        // Conforms to `ModelProvisioning.ModelDownloading` — streams to disk, hashes
+        // as it streams, updates `.download-state.json` atomically, resumes from the
+        // recorded offset. Kept out of `ModelProvisioning` so that module stays free
+        // of `URLSession`/networking; tested headlessly against a `URLProtocol` stub
+        // (no real network, no production model).
+        .target(
+            name: "ModelDownloader",
+            dependencies: ["ModelProvisioning"]
+        ),
         .testTarget(
             name: "AppLifecycleTests",
             dependencies: ["AppLifecycle"]
@@ -212,6 +226,15 @@ let package = Package(
         .testTarget(
             name: "STTVoiceSessionTests",
             dependencies: ["STTVoiceSession", "SpeechToText", "AideCore"]
+        ),
+        // Headless suite for the real resumable downloader: a `URLProtocol` stub
+        // stands in for the network (no local server, no real HF/network access) —
+        // full download → verified; interrupted mid-stream → resume from the
+        // recorded offset → completes & verifies; a byte-mismatched transfer is
+        // caught by `ModelVerification`, never reported `.verified`.
+        .testTarget(
+            name: "ModelDownloaderTests",
+            dependencies: ["ModelDownloader", "ModelProvisioning", "Persistence"]
         ),
     ]
 )

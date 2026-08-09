@@ -27,7 +27,10 @@ public struct Settings: Equatable, Sendable, Codable {
     /// step. **v2** (Phase 5) added the `hotkeys` block on top of the v1 `indicators`
     /// baseline (§2.5). **v3** (Phase 10) added `privacy` (the one-time
     /// network-utilities disclosure ack) and `onboarding` (first-run resumability).
-    public static let currentSchemaVersion = 3
+    /// **v4** (P2a Phase 5) added `stt_model_tier` — the onboarding-confirmed Whisper
+    /// Tier, so `SttTierPolicy`'s override survives relaunch instead of only ever
+    /// reading detected RAM.
+    public static let currentSchemaVersion = 4
 
     /// The document's schema version. Always normalised to `currentSchemaVersion`
     /// in memory (migration runs on load), so an in-memory value never lags the file.
@@ -53,17 +56,26 @@ public struct Settings: Equatable, Sendable, Codable {
     /// `Onboarding.OnboardingFlow.init(resumeAt:)` on the next launch.
     public var onboarding: OnboardingProgress
 
+    /// The onboarding-confirmed Whisper Tier (`SpeechToText.SttTierPolicy.Tier.rawValue`,
+    /// e.g. `"8gb"`/`"16gb"`; P2a Phase 5; User Story 18). `Configuration` does not depend
+    /// on `SpeechToText` — stored as a plain `String?`, mirroring how `onboarding.resumeStep`
+    /// avoids depending on `Onboarding`. `nil` means "not yet confirmed": the App layer falls
+    /// back to detected RAM alone until the onboarding tier step sets this once.
+    public var sttModelTier: String?
+
     public init(
         hotkeys: Hotkeys = Hotkeys(),
         indicators: Indicators = Indicators(),
         privacy: Privacy = Privacy(),
-        onboarding: OnboardingProgress = OnboardingProgress()
+        onboarding: OnboardingProgress = OnboardingProgress(),
+        sttModelTier: String? = nil
     ) {
         self.schemaVersion = Settings.currentSchemaVersion
         self.hotkeys = hotkeys
         self.indicators = indicators
         self.privacy = privacy
         self.onboarding = onboarding
+        self.sttModelTier = sttModelTier
     }
 
     /// The safe defaults used for a missing or unreadable file (User Story 38: a
@@ -76,6 +88,7 @@ public struct Settings: Equatable, Sendable, Codable {
         case indicators
         case privacy
         case onboarding
+        case sttModelTier = "stt_model_tier"
     }
 
     public init(from decoder: Decoder) throws {
@@ -88,6 +101,7 @@ public struct Settings: Equatable, Sendable, Codable {
         self.privacy = try container.decodeIfPresent(Privacy.self, forKey: .privacy) ?? Privacy()
         self.onboarding =
             try container.decodeIfPresent(OnboardingProgress.self, forKey: .onboarding) ?? OnboardingProgress()
+        self.sttModelTier = try container.decodeIfPresent(String.self, forKey: .sttModelTier)
     }
     // `encode(to:)` is synthesised from `CodingKeys` — writes every block above.
 }

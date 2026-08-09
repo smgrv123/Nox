@@ -3,6 +3,7 @@ import AppKit
 import AppLifecycle
 import Configuration
 import Hotkeys
+import ModelProvisioning
 import Onboarding
 import Overlay
 import Permissions
@@ -65,22 +66,21 @@ final class AppCoordinator: ObservableObject {
 
     /// P2a Phase 3 (the seam paying off; User Stories 1, 6, 22): the **real** STT-backed
     /// `AideCore.VoiceSessionDriver`, swapped in for `MockVoiceSessionDriver` with no change
-    /// to `VoiceSessionCoordinator`/Overlay. Drives `AudioCapture` → `WhisperSTTEngine`
-    /// (in-process whisper.cpp) → `SegmentPreGate`. Constructing it opens nothing (mic opens
-    /// only on a hold; model loads lazily; an absent model fails safe, not a crash).
-    private let voiceDriver = STTVoiceSessionDriver(
-        engine: WhisperSTTEngine(modelURL: AppCoordinator.sttModelURL),
+    /// to `VoiceSessionCoordinator`/Overlay. Constructing it opens nothing (mic opens only
+    /// on a hold; model loads lazily; an absent model fails safe, not a crash). `lazy`, not
+    /// `let` (Phase 5): the model path depends on `settings.sttModelTier`, not loaded yet at
+    /// construction time — only once `setUpStorage()` runs. Mirrors `voiceSession` below.
+    private lazy var voiceDriver = STTVoiceSessionDriver(
+        engine: WhisperSTTEngine(modelURL: AppCoordinator.modelsDirectory.blobURL(for: resolvedSttModelDescriptor)),
         capture: AudioCapture(),
         preGate: SegmentPreGate(thresholds: .provisional))
 
-    /// The manually-placed Whisper model path (Phase 1 convention; Phase 5 provisioning
-    /// retires it) — resolved eagerly so `voiceDriver` can be a stored `let`.
-    private static var sttModelURL: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appending(path: "Aide", directoryHint: .isDirectory)
-            .appending(path: "models", directoryHint: .isDirectory)
-            .appending(path: "ggml-base.en.bin")
-    }
+    /// Progress/failure/ready state of the onboarding-triggered model download (Phase 5;
+    /// User Stories 15, 19); `nil` until `confirmSttTier(_:)` starts one.
+    @Published var sttModelProvisioningState: ModelProvisioner.State?
+
+    /// The in-flight provisioning task, if any — cancelled/replaced on Retry.
+    var sttModelProvisioningTask: Task<Void, Never>?
 
     /// Orchestrates hotkey → Overlay → `voiceDriver` → Overlay (docs/04-hld.md §13,
     /// docs/05-lld.md §10). `lazy` because its `emit` sink is `overlay.send` and its

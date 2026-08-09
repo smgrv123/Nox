@@ -16,6 +16,16 @@ public enum SttTierPolicy {
         case tier8GB = "8gb"
         /// RAM ≥ 16GB (or override): Whisper large-v3-turbo.
         case tier16GB = "16gb"
+
+        /// Human-readable label for the onboarding tier-confirm screen (Phase 5's
+        /// `OnboardingTierStep` reads this directly now that it drives real provisioning,
+        /// rather than the P1 placeholder `Onboarding.OnboardingTier.displayName`).
+        public var displayName: String {
+            switch self {
+            case .tier8GB: return "8 GB"
+            case .tier16GB: return "16 GB"
+            }
+        }
     }
 
     /// ≥ this proposes the 16GB Tier (docs/06-walkthrough.md §2.1: "RAM is read via
@@ -44,30 +54,31 @@ public enum SttTierPolicy {
 }
 
 extension ModelDescriptor {
-    /// 16GB-tier Whisper model (docs/04-hld.md §4.3).
-    ///
-    /// TODO(P5): pin `pinnedRevision` / `expectedSHA256` / `byteSize` when the real
-    /// resumable download lands. Placeholder values are deliberately **unpinned** so
-    /// `ModelVerification` fails closed against them until the pin exists.
+    /// The `ggerganov/whisper.cpp` HF revision both production descriptors below are pinned
+    /// to (docs/native-deps.md — obtained from the HF tree API without downloading either
+    /// multi-GB blob; cross-checked against the `resolve` endpoint's `X-Repo-Commit`).
+    private static let productionRevision = "5359861c739e955e79d9a303bcbc70fb988958b1"
+
+    /// 16GB-tier Whisper model (docs/04-hld.md §4.3; Phase 5 — real pin, replacing the
+    /// Phase 4 placeholder). SHA-256/size are the HF tree API's `lfs.oid`/`lfs.size` for
+    /// `ggml-large-v3-turbo.bin` at `productionRevision` (docs/native-deps.md).
     public static let whisperLargeV3Turbo = ModelDescriptor(
         repo: "ggerganov/whisper.cpp",
-        pinnedRevision: "",
+        pinnedRevision: productionRevision,
         filename: "ggml-large-v3-turbo.bin",
-        expectedSHA256: "",
-        byteSize: 0,
+        expectedSHA256: "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69",
+        byteSize: 1_624_555_275,
         onDiskRelativePath: "ggml-large-v3-turbo.bin")
 
-    /// 8GB-tier Whisper model — the locked small/medium variant (docs/04-hld.md §4.3; the
-    /// small-vs-medium choice is a build-time calibration decision the tier treats as a
-    /// parameter).
-    ///
-    /// TODO(P5): pin `pinnedRevision` / `expectedSHA256` / `byteSize` when the real
-    /// download lands. Unpinned until then, so verification fails closed.
+    /// 8GB-tier Whisper model — the locked **multilingual** small variant (docs/04-hld.md
+    /// §4.3; NOT `.en` — required for `.auto` Hindi / code-mixed detection, User Story 4).
+    /// SHA-256/size are the HF tree API's `lfs.oid`/`lfs.size` for `ggml-small.bin` at
+    /// `productionRevision` (docs/native-deps.md).
     public static let whisperSmall = ModelDescriptor(
         repo: "ggerganov/whisper.cpp",
-        pinnedRevision: "",
+        pinnedRevision: productionRevision,
         filename: "ggml-small.bin",
-        expectedSHA256: "",
-        byteSize: 0,
+        expectedSHA256: "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
+        byteSize: 487_601_967,
         onDiskRelativePath: "ggml-small.bin")
 }

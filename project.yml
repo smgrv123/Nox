@@ -59,6 +59,16 @@ targets:
       # WhisperSTTEngine + AudioCapture (App/AudioCapture.swift) into it.
       - package: AideModules
         product: STTVoiceSession
+      # P2a/P2b Phase 5: the shared, pure model-provisioning core (descriptor,
+      # verification, resume math, download-state codec, models directory, the
+      # ModelProvisioner orchestrator) — the App layer resolves paths/descriptors
+      # through it directly (AppCoordinator+ModelProvisioning.swift).
+      - package: AideModules
+        product: ModelProvisioning
+      # P2a/P2b Phase 5: the resumable ranged-HTTP-GET shell — the one allowed
+      # network egress. Real conformer of ModelProvisioning.ModelDownloading.
+      - package: AideModules
+        product: ModelDownloader
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.aide.Aide
