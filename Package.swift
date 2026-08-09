@@ -29,6 +29,9 @@ let package = Package(
         .library(name: "SpeechToText", targets: ["SpeechToText"]),
         .library(name: "WhisperSTTEngine", targets: ["WhisperSTTEngine"]),
         .library(name: "STTVoiceSession", targets: ["STTVoiceSession"]),
+        // P2a/P2b · the shared, pure model-provisioning core (descriptor,
+        // verification, resume math, download-state codec, models directory).
+        .library(name: "ModelProvisioning", targets: ["ModelProvisioning"]),
     ],
     targets: [
         .target(name: "AideCore"),
@@ -103,7 +106,18 @@ let package = Package(
         // not a parallel enum.
         .target(
             name: "SpeechToText",
-            dependencies: ["AideCore"]
+            dependencies: ["AideCore", "ModelProvisioning"]
+        ),
+        // P2a/P2b · pure, headless model provisioning (docs/05-lld.md §2.7): the
+        // `ModelDescriptor` value type, `ModelVerification` (SHA-256 + size, scanner-
+        // serious), `ResumePlan` (resumable-download math), the `DownloadState` codec,
+        // and `ModelsDirectory` (user-discoverable path resolution). No network, no
+        // whisper — only I/O against injected file URLs. Reuses `Persistence`'s
+        // `AtomicFileWriter` for the atomic `.download-state.json` mutation contract.
+        // Shared with P2b's LLM runtime, so it depends on NO STT/LLM specifics.
+        .target(
+            name: "ModelProvisioning",
+            dependencies: ["Persistence"]
         ),
         // whisper.cpp as a prebuilt, SHA-256-pinned xcframework (locked native-binary
         // decision; docs/native-deps.md). SwiftPM downloads + verifies it against the
@@ -170,9 +184,18 @@ let package = Package(
             dependencies: ["Onboarding", "Permissions"]
         ),
         // Pure, headless unit suite for the STT value types + mock (no native binary).
+        // Depends on `ModelProvisioning` too: `SttTierPolicy` maps a Tier to a
+        // `ModelDescriptor`, so its tests assert against the descriptor type.
         .testTarget(
             name: "SpeechToTextTests",
-            dependencies: ["SpeechToText", "AideCore"]
+            dependencies: ["SpeechToText", "AideCore", "ModelProvisioning"]
+        ),
+        // Pure, headless unit suite for the model-provisioning core (no network):
+        // verification over fixture bytes, resume math, codec round-trip + atomic
+        // write, and path resolution against an injected temp root.
+        .testTarget(
+            name: "ModelProvisioningTests",
+            dependencies: ["ModelProvisioning", "Persistence"]
         ),
         // Opt-in headless integration check for the real whisper decode: a committed
         // sample WAV → `WhisperSTTEngine` → assert the transcript + populated per-segment
