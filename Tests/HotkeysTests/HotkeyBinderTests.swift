@@ -199,4 +199,31 @@ final class HotkeyBinderTests: XCTestCase {
             binder.resolve(keyCode: spaceKey, eventFlags: optionFlag, phase: .up, activeHotkey: .dictation),
             HotkeyActivation(hotkey: .command, phase: .up))
     }
+
+    // MARK: - (4) active-tap consume decision
+    //
+    // `App/HotkeyManager` now installs an active (`.defaultTap`) tap and must decide,
+    // synchronously and per event, whether to swallow it (`return nil` from the tap
+    // callback) so the focused app never sees a bound push-to-talk chord — matching
+    // Raycast / Wispr Flow. The consume condition IS `resolve(...) != nil`: the exact
+    // same call the shell already uses to signal a PTT down/up, reused as-is.
+
+    func testBoundChordKeyDownResolvesSoTheTapWillConsumeIt() {
+        // A key-repeat/autorepeat keyDown carries the same (keyCode, flags) as the
+        // first press, so it resolves identically — every repeat must be swallowed,
+        // not just the initial keyDown, or the app would see the chord mid-hold.
+        let binder = HotkeyBinder(hotkeys: Settings.Hotkeys())
+
+        XCTAssertNotNil(
+            binder.resolve(keyCode: spaceKey, eventFlags: optionFlag, phase: .down, activeHotkey: nil),
+            "a bound chord's keyDown (incl. autorepeat) must resolve so the tap swallows it")
+    }
+
+    func testUnboundKeyDownResolvesToNilSoTheTapPassesItThrough() {
+        let binder = HotkeyBinder(hotkeys: Settings.Hotkeys())
+
+        XCTAssertNil(
+            binder.resolve(keyCode: spaceKey, eventFlags: 0, phase: .down, activeHotkey: nil),
+            "an unbound key must resolve to nil so the tap leaves it untouched")
+    }
 }

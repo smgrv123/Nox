@@ -8,10 +8,14 @@ import os
 ///
 /// A session event tap is the mechanism used by comparable dictation tools: it yields
 /// clean keyDown/keyUp pairs (needed to know when the user starts and stops holding)
-/// and sees events from any foreground app. Because the tap is **listen-only**, it
-/// requires the **Input Monitoring** permission (`kTCCServiceListenEvent`) — a
-/// permission distinct from **Accessibility**, which Aide will need for Text Insertion
-/// (a later pillar), not for this capture path (docs/04-hld.md §13, docs/05-lld.md §8).
+/// and sees events from any foreground app. The tap is **active** (`.defaultTap`), not
+/// listen-only: it consumes a bound push-to-talk chord — so the focused app never sees
+/// it — the same way Raycast / Wispr Flow override their hotkeys, while every other key
+/// passes through untouched. It requires the **Input Monitoring** permission
+/// (`kTCCServiceListenEvent`); because an active tap can modify the event stream rather
+/// than only observe it, `tapCreate` may now ALSO require **Accessibility** — a
+/// permission Aide will separately need for Text Insertion (a later pillar)
+/// (docs/04-hld.md §13, docs/05-lld.md §8).
 ///
 /// This shell is deliberately thin: it installs the tap and forwards raw events to the
 /// pure `HotkeyBinder` (the tested "settings → chords" + "event → semantic hotkey"
@@ -83,13 +87,21 @@ final class HotkeyManager {
             let tap = CGEvent.tapCreate(
                 tap: .cgSessionEventTap,
                 place: .headInsertEventTap,
-                options: .listenOnly,
+                options: .defaultTap,
                 eventsOfInterest: CGEventMask(mask),
                 callback: { _, type, event, refcon in
                     let manager = Unmanaged<HotkeyManager>.fromOpaque(refcon!).takeUnretainedValue()
                     // Read the few primitive fields here (cheap) and hand off to the
                     // main actor. NOTHING heavy runs in the tap — it returns immediately.
                     manager.enqueue(type: type, event: event)
+                    // Consume (swallow) a bound push-to-talk chord — including its
+                    // autorepeat keyDowns — so the focused app never sees it, the same
+                    // way Raycast / Wispr Flow override their hotkeys.
+                    if manager.isBoundPushToTalkChord(type: type, event: event) {
+                        return nil
+                    }
+                    // Every other event (unbound keys, flagsChanged, tap-disabled
+                    // notifications) passes through untouched.
                     return Unmanaged.passUnretained(event)
                 },
                 userInfo: Unmanaged.passUnretained(self).toOpaque()
@@ -98,8 +110,12 @@ final class HotkeyManager {
             // Input Monitoring not granted: tapCreate fails. Surface an actionable message
             // — never fail silently (User Story 15) — and the P7 fix-it (hint + exact-pane
             // deep-link). The tap-create failure IS the Input-Monitoring-denied signal for
-            // the hotkey path.
-            logger.error("Event tap creation failed — Input Monitoring permission not granted.")
+            // the hotkey path — though now that the tap is active (`.defaultTap`, not
+            // listen-only), a `nil` here could ALSO mean Accessibility is the missing
+            // grant; say so explicitly so this run's logs point at the right pane.
+            logger.error(
+                "Event tap creation failed — grant Input Monitoring; the active .defaultTap tap may also need Accessibility."
+            )
             onStatus?(Self.inputMonitoringNeededStatus)
             onInputMonitoringStatus?(PermissionAdvice.make(for: .inputMonitoring, status: .denied))
             return
@@ -139,7 +155,10 @@ final class HotkeyManager {
     }
 
     /// Runs on the tap's run-loop thread. Extracts primitives and hops to the main
-    /// actor; it never touches `binder`/`activeHotkey` itself (those are main-only).
+    /// actor for the actual down/up decision + state update; it never touches
+    /// `binder`/`activeHotkey` itself (those reads happen on the main actor in
+    /// `process` below, or synchronously in `isBoundPushToTalkChord`, which needs an
+    /// answer before this callback returns — see its doc comment).
     private func enqueue(type: CGEventType, event: CGEvent) {
         let phase: HotkeyPhase
         switch type {
@@ -161,6 +180,29 @@ final class HotkeyManager {
         Task { @MainActor [weak self] in
             self?.process(keyCode: keyCode, eventFlags: flags, phase: phase)
         }
+    }
+
+    /// Whether `type`/`event` is a bound push-to-talk chord — the exact condition
+    /// under which `process` below signals a PTT down/up (same `resolve` overload,
+    /// same release-edge fallback, same autorepeat-keyDown behavior), reused as-is so
+    /// the two decisions can never drift apart. The active tap's callback must return
+    /// `nil` (consume) or the original event (pass through) before it can hand off to
+    /// the main actor, so — unlike `enqueue` above — this reads `binder`/`activeHotkey`
+    /// directly on the tap's own thread rather than waiting for the `Task` hop; both
+    /// are plain, non-isolated properties only ever written on the main actor, and this
+    /// is a same-event read-only snapshot, so it stays consistent with what `process`
+    /// computes for the same event a moment later.
+    private func isBoundPushToTalkChord(type: CGEventType, event: CGEvent) -> Bool {
+        let phase: HotkeyPhase
+        switch type {
+        case .keyDown: phase = .down
+        case .keyUp: phase = .up
+        default: return false  // flagsChanged, tap-disabled notifications, etc.
+        }
+        guard let binder else { return false }
+        let keyCode = Int(event.getIntegerValueField(.keyboardEventKeycode))
+        let flags = event.flags.rawValue
+        return binder.resolve(keyCode: keyCode, eventFlags: flags, phase: phase, activeHotkey: activeHotkey) != nil
     }
 
     /// Main-actor reaction: ask the binder for the decision (normal chord match, or its
