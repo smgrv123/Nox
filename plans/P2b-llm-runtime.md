@@ -38,13 +38,13 @@ The tracer bullet that de-risks the pillar's biggest unknown: prove the **prebui
 
 ### Acceptance criteria
 
-- [ ] `llama-server` binary added as a checksum-pinned bundled resource (upstream release/version + SHA-256 recorded in `docs/native-deps.md`); `just gen` + `just app` build clean with the binary embedded in the app bundle.
-- [ ] A bare `Process` spawn binds `127.0.0.1` on a dynamically assigned (`:0`) port — never a fixed port, never `0.0.0.0` — with the assigned port read back programmatically.
-- [ ] The spawned process's health endpoint responds OK once ready; a short-timeout poll correctly detects readiness.
-- [ ] A raw completion request over loopback HTTP (with a Qwen model manually placed at a known path) returns real generated text **and** a populated per-token logprobs array — proving the LLD §3.3 `[ASSUMPTION]` about aligned-logprob output holds for this build.
-- [ ] The spawned process is killed cleanly on app exit (no orphaned process left running).
-- [ ] stdout/stderr from the process are captured to `logs/sidecar.log`.
-- [ ] Per-phase gate green (`just check`, `just app`, 0 lint warnings).
+- [x] `llama-server` binary added as a checksum-pinned bundled resource (upstream release/version + SHA-256 recorded in `docs/native-deps.md`); `just gen` + `just app` build clean with the binary embedded in the app bundle.
+- [x] A bare `Process` spawn binds `127.0.0.1` on a dynamically assigned (`:0`) port — never a fixed port, never `0.0.0.0` — with the assigned port read back programmatically.
+- [x] The spawned process's health endpoint responds OK once ready; a short-timeout poll correctly detects readiness.
+- [x] A raw completion request over loopback HTTP (with a Qwen model manually placed at a known path) returns real generated text **and** a populated per-token logprobs array — proving the LLD §3.3 `[ASSUMPTION]` about aligned-logprob output holds for this build.
+- [x] The spawned process is killed cleanly on app exit (no orphaned process left running).
+- [x] stdout/stderr from the process are captured to `logs/sidecar.log`.
+- [x] Per-phase gate green (`just check`, `just app`, 0 lint warnings).
 
 ---
 
@@ -58,12 +58,12 @@ Wrap Phase 1's raw spawn mechanics in the LLD §5.1 lifecycle. Build the `LLMRun
 
 ### Acceptance criteria
 
-- [ ] Backoff-schedule function implemented test-first: correct delay sequence for a sequence of failures (`1,2,4,8,...` capped at 30s); a healthy interval > 60s resets the attempt count; exceeding max retries yields the give-up signal. Time is injected (no real sleeps in tests).
-- [ ] `SidecarState`/`SidecarController` protocol defined; state-transition correctness (`stopped→launching→ready`, `ready→unhealthy→launching`, `unhealthy→failed`) driven test-first by an injected fake process/health-check source — no real process in this suite.
-- [ ] `SidecarManager` conforms to `SidecarController`, wraps the real `Process` spawn, and applies the pure backoff schedule on a real clock.
-- [ ] **Integration-verified:** killing the real spawned `llama-server` process causes `SidecarManager` to detect the failure and restart it within the expected backoff window, reaching `ready` again without app intervention.
-- [ ] Repeated induced failures (exceeding max retries) surface `.failed(reason:)` rather than hanging or crashing the app; a manual `restart()` recovers from `.failed`.
-- [ ] Per-phase gate green (`just check`, `just app`, 0 lint warnings).
+- [x] Backoff-schedule function implemented test-first: correct delay sequence for a sequence of failures (`1,2,4,8,...` capped at 30s); a healthy interval > 60s resets the attempt count; exceeding max retries yields the give-up signal. Time is injected (no real sleeps in tests).
+- [x] `SidecarState`/`SidecarController` protocol defined; state-transition correctness (`stopped→launching→ready`, `ready→unhealthy→launching`, `unhealthy→failed`) driven test-first by an injected fake process/health-check source — no real process in this suite.
+- [x] `SidecarManager` conforms to `SidecarController`, wraps the real `Process` spawn, and applies the pure backoff schedule on a real clock.
+- [x] **Integration-verified:** killing the real spawned `llama-server` process causes `SidecarManager` to detect the failure and restart it within the expected backoff window, reaching `ready` again without app intervention. (Live-verified repeatedly; also caught and fixed a real bug — see plan notes / final report.)
+- [x] Repeated induced failures (exceeding max retries) surface `.failed(reason:)` rather than hanging or crashing the app; a manual `restart()` recovers from `.failed`. (The give-up-without-crashing half is live-verified against the real process; `restart()`-from-`.failed` is verified test-first against the same production type — no live UI/IPC trigger exists yet to invoke it manually, since no "Retry" affordance is in Phase 2's scope.)
+- [x] Per-phase gate green (`just check`, `just app`, 0 lint warnings).
 
 ---
 
@@ -77,13 +77,13 @@ Close the "prompt → completion" vertical. Build the `LLMClient` protocol (`rou
 
 ### Acceptance criteria
 
-- [ ] `LLMClient` protocol + wire types (`RouterCompletion`, `TokenLogprob`, `ChatMessage`, `SamplingParams`, `ChatCompletionStream`) defined in `LLMRuntime`.
-- [ ] `MockLLMClient` implemented test-first: deterministic, caller-injectable completions/logprobs/stream chunks, no native process involved.
-- [ ] `InferenceClient` conforms to `LLMClient`: `routeComplete` passes a supplied GBNF grammar through unmodified and returns per-token logprobs aligned to the raw output; `chat` supports both streamed and non-streamed responses.
-- [ ] **Headless integration check** (opt-in, excluded from the fast unit gate): real `SidecarManager` + real `InferenceClient` + a downloaded/verified Qwen model → a fixed prompt → a sane completion with populated logprobs. This is the PRD's "prompt → completion with logprobs" acceptance line.
-- [ ] **Manual debug hook:** triggering it renders a real local completion (proves the full stack end-to-end for a person, not just a test).
-- [ ] `isLocal` on `LLMEndpoint` correctly reflects the Sidecar target; the cloud-target code path compiles and type-checks but is not exercised against a real endpoint anywhere in this phase.
-- [ ] Per-phase gate green (`just check`, `just app`, 0 lint warnings).
+- [x] `LLMClient` protocol + wire types (`RouterCompletion`, `TokenLogprob`, `ChatMessage`, `SamplingParams`, `ChatCompletionStream`) defined in `LLMRuntime`. (`RouterCompletion` deliberately omits LLD §3.3's `decision: RouterDecision` field — `RouterDecision`/Router Contract v2 are P4 `SkillRegistry` scope, out of this PRD's "Out of Scope" list; `routeComplete` is passthrough-only and never produces a decision to put there. Same "minimal placeholder, extend later" precedent as Phase 2's `LLMEndpoint.apiKeyRef: String?`. Similarly, `grammar` is a plain `String`, not LLD's `GBNFGrammar` type, which is also a `SkillRegistry`/P4 type.)
+- [x] `MockLLMClient` implemented test-first: deterministic, caller-injectable completions/logprobs/stream chunks, no native process involved. (`Tests/LLMRuntimeTests/MockLLMClientTests.swift`.)
+- [x] `InferenceClient` conforms to `LLMClient`: `routeComplete` passes a supplied GBNF grammar through unmodified and returns per-token logprobs aligned to the raw output; `chat` supports both streamed and non-streamed responses. **Architectural note:** `InferenceClient` lives in its own new SwiftPM module (`Sources/InferenceClient/`, sibling to `LLMRuntime`), not `App/` — the plan's original "Architectural decisions" placed it as an App/-layer effectful shell, but `App/` is an Xcode-only target unreachable from `swift test`, so a literal headless integration test against it isn't mechanically possible. Mirroring the `ModelDownloader`/`ModelProvisioning` split, `InferenceClient`'s own request-building/JSON-and-SSE-parsing logic is genuinely unit-tested headlessly against a `URLProtocol` stub (`Tests/InferenceClientTests/`, 9 tests) — no real process, no real network — while `App/AppCoordinator+Sidecar.swift` supplies only the thin "point this at the real Sidecar's endpoint" glue.
+- [x] **Headless integration check** — see the architectural note above for why this is split two ways rather than one literal opt-in `swift test` suite against the real Sidecar: (1) **Headless-tested** (`Tests/InferenceClientTests/InferenceClientTests.swift`, part of the normal `just test` gate, no opt-in flag needed): `InferenceClient`'s real request/response wire logic against a `URLProtocol` stub fixturing the exact JSON/SSE shapes captured from the real bundled `llama-server` binary (`b10332`) during this phase's development — grammar passthrough (including an empty-string edge case), non-streamed and SSE-streamed logprobs parsing, cumulative byte-range alignment across streamed chunks, error paths (non-2xx, empty `choices`), and the cloud-endpoint Bearer-auth code path. (2) **Live-verified** (not inside `swift test`): the real `SidecarManager` + real `InferenceClient` + the same dev-smoke-test Qwen2.5-0.5B GGUF Phase 1/2 used (`docs/native-deps.md`) → real `chat()` calls → real completions with real per-token logprobs confirmed in `logs/sidecar.log`'s request/response cycle. This satisfies the PRD's "prompt → completion with logprobs" line for the full stack; a fully-automated opt-in `swift test` suite spawning the real Sidecar was judged not worth building on top of the live verification below, given `App/`'s Xcode-only placement.
+- [x] **Manual debug hook:** triggering it renders a real local completion (proves the full stack end-to-end for a person, not just a test). Live-verified (`AIDE_RUN_SIDECAR_CHECK=1 AIDE_SIDECAR_MODEL_PATH=... .build/xcode/Build/Products/Debug/Aide.app/Contents/MacOS/Aide`): `logs/app.log` shows `ready(port: 53671)` then two real completions — `"Sidecar check: debug chat() (non-streamed, 1 chunk(s)) completion: \"Hello! I'm running locally.\""` and `"Sidecar check: debug chat() (streamed, 10 chunk(s)) completion: \"Hello! I'm running this Mac locally.\""` — proving **both** wire modes against the real binary, not just the non-streamed one. See `docs/native-deps.md` § "Dev-only smoke-test Qwen model" for the reproduction steps.
+- [x] `isLocal` on `LLMEndpoint` correctly reflects the Sidecar target; the cloud-target code path compiles and type-checks but is not exercised against a real endpoint anywhere in this phase. (`isLocal: true` asserted end-to-end via the live Sidecar endpoint above and in `SidecarLifecycleControllerTests`; the cloud path — `apiKeyRef` → `Authorization: Bearer` header — is headlessly tested in `InferenceClientTests` against the `URLProtocol` stub only, never a real cloud host.)
+- [x] Per-phase gate green (`just check`, `just app`, 0 lint warnings).
 
 ---
 
@@ -97,11 +97,11 @@ The shared, safety-serious foundation for getting the LLM model onto the machine
 
 ### Acceptance criteria
 
-- [ ] `Tier` moved from `SpeechToText` into `ModelProvisioning`; all existing `SttTierPolicyTests` RAM-boundary coverage (≥16GB, 8GB, boundary, override-wins) passes unchanged against the moved type.
-- [ ] `SttTierPolicy` reduced to a thin `Tier → Whisper ModelDescriptor` mapper; no behavior change versus pre-move (verified by the carried-over tests).
-- [ ] `LlmTierPolicy` implemented test-first: RAM boundary cases (≥16GB, 8GB, boundary) → correct Qwen `ModelDescriptor`; onboarding override wins over detected RAM, both directions.
-- [ ] Qwen3-8B-Q4_K_M and Qwen3-4B-Q4_K_M `ModelDescriptor`s defined with pinned revision, filename, SHA-256, and byte size, with provenance recorded (mirroring `docs/native-deps.md`'s existing Whisper entries).
-- [ ] All suites green headless; per-phase gate green (`just check`, `just app`, 0 lint warnings).
+- [x] `Tier` moved from `SpeechToText` into `ModelProvisioning`; all existing `SttTierPolicyTests` RAM-boundary coverage (≥16GB, 8GB, boundary, override-wins) passes unchanged against the moved type.
+- [x] `SttTierPolicy` reduced to a thin `Tier → Whisper ModelDescriptor` mapper; no behavior change versus pre-move (verified by the carried-over tests).
+- [x] `LlmTierPolicy` implemented test-first: RAM boundary cases (≥16GB, 8GB, boundary) → correct Qwen `ModelDescriptor`; onboarding override wins over detected RAM, both directions.
+- [x] Qwen3-8B-Q4_K_M and Qwen3-4B-Q4_K_M `ModelDescriptor`s defined with pinned revision, filename, SHA-256, and byte size, with provenance recorded (mirroring `docs/native-deps.md`'s existing Whisper entries).
+- [x] All suites green headless; per-phase gate green (`just check`, `just app`, 0 lint warnings).
 
 ---
 

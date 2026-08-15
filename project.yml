@@ -20,6 +20,20 @@ targets:
     platform: macOS
     sources:
       - path: App
+      # P2b Phase 1 (docs/native-deps.md § llama-server (LLM Sidecar)): the pinned,
+      # checksum-verified llama-server executable + its sibling dylibs (fetched by
+      # `just vendor-llama-server`, gitignored — Vendor/README.md). Bundled as a raw
+      # folder reference via a dedicated Copy Files phase (destination: Resources), NOT
+      # a SwiftPM `.binaryTarget` like whisper's xcframework — llama-server is a
+      # spawnable executable, not a linkable library, so SwiftPM's binaryTarget
+      # mechanism (which links, not embeds-a-raw-executable) doesn't apply. Lands at
+      # Contents/Resources/llama-server/ in the built app, resolved at runtime via
+      # `Bundle.main.resourceURL` (App/LlamaServerProcessSource.swift).
+      - path: Vendor/bin/llama-server
+        type: folder
+        buildPhase:
+          copyFiles:
+            destination: resources
     dependencies:
       - package: AideModules
         product: AideCore
@@ -69,6 +83,16 @@ targets:
       # network egress. Real conformer of ModelProvisioning.ModelDownloading.
       - package: AideModules
         product: ModelDownloader
+      # P2b Phase 2/3: the LLM-runtime pure heart — `SidecarController`/`SidecarState`,
+      # the backoff schedule, the tested `SidecarLifecycleController` engine that
+      # App/SidecarManager.swift configures with the real llama-server process source,
+      # and (Phase 3) the `LLMClient` protocol + wire types + `MockLLMClient`.
+      - package: AideModules
+        product: LLMRuntime
+      # P2b Phase 3: the real `LLMClient` conformer — a `URLSession`-based OpenAI-
+      # compatible HTTP client, targeting the Sidecar's `LLMEndpoint` once `.ready`.
+      - package: AideModules
+        product: InferenceClient
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.aide.Aide

@@ -35,6 +35,18 @@ let package = Package(
         // P2a/P2b Phase 5 · the resumable-download effectful shell (the one allowed
         // network egress). Conforms to `ModelProvisioning.ModelDownloading`.
         .library(name: "ModelDownloader", targets: ["ModelDownloader"]),
+        // P2b · LLM Runtime's pure heart (mirrors `SpeechToText`'s role for P2a):
+        // `LlmTierPolicy`, `LLMEndpoint`, `SidecarController`/`SidecarState`/backoff
+        // (Phase 2), and the `LLMClient` protocol + wire types + `MockLLMClient`
+        // (Phase 3). Idle-unload arrives in Phase 6.
+        .library(name: "LLMRuntime", targets: ["LLMRuntime"]),
+        // P2b Phase 3 · the real `LLMClient` conformer: a `URLSession`-based OpenAI-
+        // compatible HTTP client. A sibling module to `LLMRuntime` (not inside it, not
+        // inside App/) for the same reason `ModelDownloader` sits beside
+        // `ModelProvisioning` rather than inside it — its own logic (request building,
+        // JSON/SSE parsing) is genuinely unit-testable headlessly against a `URLProtocol`
+        // stub, so it stays in the fast `swift test` gate instead of being opt-in-only.
+        .library(name: "InferenceClient", targets: ["InferenceClient"]),
     ],
     targets: [
         .target(name: "AideCore"),
@@ -161,6 +173,23 @@ let package = Package(
             name: "ModelDownloader",
             dependencies: ["ModelProvisioning"]
         ),
+        // P2b Phase 4 · the pure LLM-runtime heart, playing the role `SpeechToText`
+        // played for P2a: `LlmTierPolicy` (Tier → Qwen `ModelDescriptor`) today; the
+        // `LLMClient`/`SidecarController` seams, backoff schedule, and idle-unload state
+        // machine arrive in later phases. Depends only on `ModelProvisioning` for the
+        // shared `Tier` type and `ModelDescriptor` — never another pillar's concrete type.
+        .target(
+            name: "LLMRuntime",
+            dependencies: ["ModelProvisioning"]
+        ),
+        // P2b Phase 3 · the real `LLMClient` conformer (specs/P2b-llm-runtime.md
+        // §"Effectful shells"; see `LLMRuntime`'s product comment above for why this is a
+        // sibling module rather than living in `App/`). `URLSession`/Foundation only — no
+        // new logic dependencies (PRD "No new logic dependencies").
+        .target(
+            name: "InferenceClient",
+            dependencies: ["LLMRuntime"]
+        ),
         .testTarget(
             name: "AppLifecycleTests",
             dependencies: ["AppLifecycle"]
@@ -235,6 +264,21 @@ let package = Package(
         .testTarget(
             name: "ModelDownloaderTests",
             dependencies: ["ModelDownloader", "ModelProvisioning", "Persistence"]
+        ),
+        // Pure, headless unit suite for the LLM-runtime heart: `LlmTierPolicy`'s Tier →
+        // Qwen `ModelDescriptor` mapping, the Sidecar lifecycle state machine + backoff
+        // (Phase 2), and the `LLMClient` wire types + `MockLLMClient` (Phase 3).
+        .testTarget(
+            name: "LLMRuntimeTests",
+            dependencies: ["LLMRuntime", "ModelProvisioning"]
+        ),
+        // Headless suite for the real `InferenceClient`: a `URLProtocol` stub stands in
+        // for the loopback Sidecar (no real process, no real network — mirrors
+        // `ModelDownloaderTests`) — request building (grammar/logprobs/messages), both
+        // non-streamed and SSE-streamed response parsing, and aligned byte-range logprobs.
+        .testTarget(
+            name: "InferenceClientTests",
+            dependencies: ["InferenceClient", "LLMRuntime"]
         ),
     ]
 )

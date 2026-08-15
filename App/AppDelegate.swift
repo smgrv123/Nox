@@ -19,6 +19,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         coordinator.applicationDidFinishLaunching()
+        // P2b Phase 2 (`AppCoordinator+Sidecar.swift`) — opt-in, manual-verification-only.
+        coordinator.runSidecarCheckIfRequested()
     }
 
     /// PHASE 10 (User Story 20): the moment the user switches back to Aide — e.g.
@@ -27,5 +29,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// poll timer.
     func applicationDidBecomeActive(_ notification: Notification) {
         coordinator.applicationDidBecomeActive()
+    }
+
+    /// P2b Phase 2 (User Story 9): give the Sidecar's async teardown a chance to kill
+    /// its `llama-server` child before the app actually exits — `.terminateLater`
+    /// is the only way to await cleanup from this synchronous delegate callback.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        coordinator.applicationShouldTerminate { NSApp.reply(toApplicationShouldTerminate: true) }
+        return .terminateLater
     }
 }

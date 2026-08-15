@@ -44,9 +44,54 @@ build:
 test:
     swift test
 
+# ── Native deps (Vendor/, not committed — docs/native-deps.md) ─────────
+_llama_release := "b10332"
+_llama_asset := "llama-b10332-bin-macos-arm64.tar.gz"
+_llama_sha256 := "2f5b9eef98f5376465cd00402ef3a68eaac1f4b11f9de0a6a59b1307255399a8"
+_llama_dir := "Vendor/bin/llama-server"
+
+# Fetch, checksum-verify, and place the pinned `llama-server` binary + its sibling
+# dylibs (docs/native-deps.md § llama-server (LLM Sidecar)) at Vendor/bin/llama-server/,
+# mirroring how SwiftPM auto-fetches the pinned whisper xcframework — llama-server can't
+# use that mechanism (it's a spawnable executable, not a linkable binaryTarget), so this
+# recipe is the equivalent build-time fetch. Idempotent: skips the download once the
+# binary is present (delete the directory to force a re-fetch after rotating the pin).
+vendor-llama-server:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -x "{{_llama_dir}}/llama-server" ]; then
+        echo "Vendor/bin/llama-server already present — skipping fetch (rm -rf {{_llama_dir}} to force)."
+        exit 0
+    fi
+    url="https://github.com/ggml-org/llama.cpp/releases/download/{{_llama_release}}/{{_llama_asset}}"
+    tmp=$(mktemp -d)
+    trap 'rm -rf "$tmp"' EXIT
+    echo "Downloading $url"
+    curl -sL -o "$tmp/asset.tar.gz" "$url"
+    actual=$(shasum -a 256 "$tmp/asset.tar.gz" | awk '{print $1}')
+    if [ "$actual" != "{{_llama_sha256}}" ]; then
+        echo "error: llama-server checksum mismatch"
+        echo "  expected {{_llama_sha256}}"
+        echo "  actual   $actual"
+        exit 1
+    fi
+    tar -xzf "$tmp/asset.tar.gz" -C "$tmp"
+    src="$tmp/llama-{{_llama_release}}"
+    mkdir -p "{{_llama_dir}}"
+    # llama-server dynamically links these via @rpath, resolved against @loader_path
+    # (its own directory) — all must sit flat alongside it, not just the executable.
+    for f in llama-server libllama-server-impl.dylib libllama-common.0.dylib libmtmd.0.dylib \
+             libllama.0.dylib libggml.0.dylib libggml-cpu.0.dylib libggml-blas.0.dylib \
+             libggml-metal.0.dylib libggml-rpc.0.dylib libggml-base.0.dylib LICENSE; do
+        cp -L "$src/$f" "{{_llama_dir}}/$f"
+    done
+    chmod +x "{{_llama_dir}}/llama-server"
+    xattr -d com.apple.quarantine "{{_llama_dir}}"/* 2>/dev/null || true
+    echo "llama-server {{_llama_release}} verified and placed at {{_llama_dir}}/"
+
 # ── Xcode app target ───────────────────────────────────────────────────
 # Regenerate Aide.xcodeproj from project.yml.
-gen:
+gen: vendor-llama-server
     xcodegen generate
 
 # Compile the .app without signing (verifies the app target builds).

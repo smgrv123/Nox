@@ -3,9 +3,12 @@ import XCTest
 
 @testable import SpeechToText
 
-/// `SttTierPolicy` maps detected RAM (or the onboarding override) to a Tier and then to
-/// the Tier-appropriate Whisper `ModelDescriptor` (docs/04-hld.md §4.3; User Story 18).
-/// This is the **real** tier→model mapping the P1 onboarding placeholder deferred to P2.
+/// `SttTierPolicy` — the thin `Tier → Whisper ModelDescriptor` mapper (docs/04-hld.md
+/// §4.3; User Story 18). The RAM-boundary/Tier logic itself moved to
+/// `ModelProvisioning.TierPolicy` in P2b Phase 4 (see
+/// `ModelProvisioningTests/TierPolicyTests.swift` for that coverage); these tests now
+/// focus on the wrapper's own job — mapping the resolved Tier to the correct Whisper
+/// `ModelDescriptor` — plus proof there is no behavior change versus pre-move.
 final class SttTierPolicyTests: XCTestCase {
 
     /// The RAM boundary under test, stated once here (docs/04-hld.md §4.3: RAM ≥ 16GB ⇒
@@ -13,21 +16,18 @@ final class SttTierPolicyTests: XCTestCase {
     /// keeps placeholder pin values out of the assertions.
     private let sixteenGiB: UInt64 = 16 * 1_024 * 1_024 * 1_024
 
-    // MARK: - RAM boundaries → Tier → ModelDescriptor
+    // MARK: - RAM boundaries → Tier → Whisper ModelDescriptor (no behavior change post-move)
 
     func testAtTheBoundaryChoosesThe16GBModel() {
-        XCTAssertEqual(SttTierPolicy.tier(physicalMemoryBytes: sixteenGiB), .tier16GB)
         XCTAssertEqual(SttTierPolicy.whisperModel(physicalMemoryBytes: sixteenGiB), .whisperLargeV3Turbo)
     }
 
     func testJustBelowTheBoundaryChoosesThe8GBModel() {
-        XCTAssertEqual(SttTierPolicy.tier(physicalMemoryBytes: sixteenGiB - 1), .tier8GB)
         XCTAssertEqual(SttTierPolicy.whisperModel(physicalMemoryBytes: sixteenGiB - 1), .whisperSmall)
     }
 
     func testWellAboveTheBoundaryChoosesThe16GBModel() {
         let thirtyTwoGiB = sixteenGiB * 2
-        XCTAssertEqual(SttTierPolicy.tier(physicalMemoryBytes: thirtyTwoGiB), .tier16GB)
         XCTAssertEqual(SttTierPolicy.whisperModel(physicalMemoryBytes: thirtyTwoGiB), .whisperLargeV3Turbo)
     }
 
@@ -49,6 +49,16 @@ final class SttTierPolicyTests: XCTestCase {
         XCTAssertNotEqual(
             SttTierPolicy.whisperModel(for: .tier8GB),
             SttTierPolicy.whisperModel(for: .tier16GB))
+    }
+
+    // MARK: - Phase 4 (P2b): `SttTierPolicy.Tier` is now the shared `ModelProvisioning` type
+
+    /// Proves the move, not just a rename: `SttTierPolicy.Tier` resolves to
+    /// `ModelProvisioning.Tier` itself, so both P2a and P2b stay pinned to one RAM
+    /// boundary rather than carrying two independently-drifting copies.
+    func testTierIsTheSharedModelProvisioningType() {
+        let resolved: ModelProvisioning.Tier = SttTierPolicy.tier(physicalMemoryBytes: sixteenGiB)
+        XCTAssertEqual(resolved, .tier16GB)
     }
 
     // MARK: - Phase 5: production descriptors are pinned (no more TODO placeholders)
@@ -89,12 +99,5 @@ final class SttTierPolicyTests: XCTestCase {
     func testBothProductionModelsArePinnedToTheSameRevision() {
         // Both files were pinned from the same HF tree snapshot — a byte-reproducible pair.
         XCTAssertEqual(ModelDescriptor.whisperLargeV3Turbo.pinnedRevision, ModelDescriptor.whisperSmall.pinnedRevision)
-    }
-
-    // MARK: - Tier display names (Phase 5: the onboarding tier step reads this directly)
-
-    func testTierDisplayNames() {
-        XCTAssertEqual(SttTierPolicy.Tier.tier8GB.displayName, "8 GB")
-        XCTAssertEqual(SttTierPolicy.Tier.tier16GB.displayName, "16 GB")
     }
 }
