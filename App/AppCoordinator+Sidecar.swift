@@ -29,10 +29,16 @@ import Persistence
 /// `AIDE_RUN_SIDECAR_SPIKE` -> `AIDE_RUN_SIDECAR_CHECK` since what it exercises is no
 /// longer a throwaway spike (docs/native-deps.md is updated to match).
 ///
+/// **P2b Phase 5** adds `startProductionSidecar(model:)` below — the *production* path
+/// that brings the Sidecar up with a real onboarding-provisioned Qwen model, no env-var
+/// or manual placement required. It shares this same handle rather than keeping a
+/// second one, so `applicationShouldTerminate(_:)` always tears down whichever of the
+/// two actually ran a given launch (in practice mutually exclusive: the dev hook only
+/// fires when a developer explicitly sets `AIDE_RUN_SIDECAR_CHECK=1`).
+///
 /// The manager's handle is a file-private global, not an `AppCoordinator` stored
 /// property: `AppCoordinator.swift` is already at SwiftLint's file-length ceiling, and
-/// this whole hook is dev-only/opt-in, so it doesn't earn a permanent home there
-/// (same reasoning as Phase 1's spike).
+/// neither caller needs it visible outside this file.
 private var sidecarManagerInstance: SidecarManager?
 
 extension AppCoordinator {
@@ -69,6 +75,48 @@ extension AppCoordinator {
             guard let endpoint = await waitForSidecarReady(manager, appLog: appLog) else { return }
             await runDebugChat(endpoint: endpoint, stream: false, appLog: appLog)
             await runDebugChat(endpoint: endpoint, stream: true, appLog: appLog)
+        }
+    }
+
+    /// Bring the real Sidecar up with a freshly provisioned Qwen model (P2b Phase 5;
+    /// User Stories 10-15) — called by `AppCoordinator+ModelProvisioning.swift` the
+    /// instant onboarding's Qwen download verifies. This is the *production* path: the
+    /// real bundled `llama-server` (`Bundle.main.resourceURL`), the real
+    /// `logs/sidecar.log`, and the real `AppCoordinator.modelsDirectory` — no env-var,
+    /// no manually-placed dev GGUF. `startIfNeeded` itself is idempotent (a no-op once
+    /// already launching/ready), so calling this again on a Retry-after-failure is safe.
+    func startProductionSidecar(model: ModelDescriptor) {
+        let manager: SidecarManager
+        if let existing = sidecarManagerInstance {
+            manager = existing
+        } else {
+            guard let logFileURL = storage?.sidecarLogFile,
+                let binaryDirectory = Bundle.main.resourceURL?.appending(
+                    path: "llama-server", directoryHint: .isDirectory)
+            else {
+                appLog?.log(
+                    "LLM Sidecar not started — storage or the bundled llama-server resource is unavailable.",
+                    level: .error)
+                return
+            }
+            let appLog = self.appLog
+            manager = SidecarManager(
+                binaryDirectory: binaryDirectory,
+                logFileURL: logFileURL,
+                modelsDirectory: AppCoordinator.modelsDirectory,
+                onStateChange: { state in
+                    appLog?.log("LLM Sidecar: state -> \(state)", level: .notice)
+                })
+            sidecarManagerInstance = manager
+        }
+
+        let appLog = self.appLog
+        Task {
+            do {
+                try await manager.startIfNeeded(model: model)
+            } catch {
+                appLog?.log("Failed to start the LLM Sidecar: \(error)", level: .error)
+            }
         }
     }
 

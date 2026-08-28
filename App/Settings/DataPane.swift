@@ -1,10 +1,11 @@
 import SwiftUI
 
 /// The Data pane (Phase 8): home for P1's data-management actions — "Wipe all history"
-/// (Phase 11; User Story 34) and, since Phase 5 (P2a), revealing the speech-model
-/// directory in Finder (User Story 16), so the user can see what Aide put on disk and
-/// reclaim the space. Both route through `AppCoordinator`: the wipe through the
-/// focus-taking `ConfirmationModal` before anything is deleted; the reveal through
+/// (Phase 11; User Story 34) and, since Phase 5 (P2a), revealing the models directory in
+/// Finder (User Story 16) — since P2b Phase 5, that's both the speech model *and* the
+/// language model, which share the same on-disk directory (`AppCoordinator.modelsDirectory`).
+/// Both route through `AppCoordinator`: the wipe through the focus-taking
+/// `ConfirmationModal` before anything is deleted; the reveal through
 /// `AppCoordinator.revealModelsFolderInFinder()`, a direct `NSWorkspace` call (nothing
 /// destructive to confirm).
 struct DataPane: View {
@@ -38,9 +39,9 @@ struct DataPane: View {
             Button {
                 coordinator.revealModelsFolderInFinder()
             } label: {
-                Label("Reveal speech models in Finder…", systemImage: "folder")
+                Label("Reveal models in Finder…", systemImage: "folder")
             }
-            Text("Shows where Aide stores the downloaded speech-recognition model on disk.")
+            Text("Shows where Aide stores the downloaded speech-recognition and language models on disk.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

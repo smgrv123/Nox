@@ -162,8 +162,11 @@ app, never part of any automated gate, and **not committed** (`*.gguf` in `.giti
   To exercise Phase 2's crash → auto-restart behavior, find the running child with
   `pgrep -fl llama-server` and `kill` it — `app.log` shows `ready` -> `unhealthy` ->
   `launching` -> `ready` again within the backoff window. This is **not** the production
-  Qwen3-8B/4B model (see "Qwen models" below, Phase 4's pins) — Phase 5 retires this
-  manual step once real provisioning wires a Tier-appropriate model in.
+  Qwen3-8B/4B model (see "Qwen models" below, Phase 4's pins). Phase 5 retires this as
+  the *production* path — `AppCoordinator.confirmModelTier(_:)` now provisions a real
+  Tier-appropriate Qwen model and calls `startProductionSidecar(model:)` with it — but
+  this env-var hook itself is untouched and stays available for manual Sidecar
+  debugging without a real onboarding run or a real download.
 
 ## Whisper models (NOT committed)
 
@@ -301,7 +304,47 @@ directly in `LlmTierPolicyTests`.
 `ModelDescriptor` statics and this table, then re-run `just check`. Never hand-compute a
 pin by downloading the file in CI or in this repo — the guardrail above is the point.
 
-### Manual full-vertical test (Phase 5 — run by hand, not automated)
+### Manual full-vertical test (P2b Phase 5 — run by hand, not automated)
+
+This needs a real multi-GB download (2.3-4.7 GiB depending on Tier) and is **not** run
+by the implementing agent (same guardrail as P2a Phase 5 above: never trigger a
+production model download in an agent session). Run it once per Phase-5-affecting
+change, on a machine where Aide has never run before (or after deleting
+`~/Library/Application Support/Aide/`):
+
+1. Build and launch: `just run`.
+2. Walk onboarding through to the **tier step**. Confirm the recommended Tier (or pick
+   the other one deliberately) and tap **Continue**.
+3. Watch the tier step show, in order: **"Step 1 of 2 — Speech Model"** (checking →
+   downloading with a progress bar and a growing `X of Y` byte count → verifying) →
+   **"Step 2 of 2 — Language Model"** (the same checking/downloading/verifying sequence,
+   now for the Qwen GGUF) → the step auto-advances. The two phases must never render at
+   once, and the heading must make it obvious which model is currently in flight.
+4. Confirm both blobs landed under `~/Library/Application Support/Aide/models/`
+   (`ggml-*.bin` and `Qwen3-*-Q4_K_M.gguf` side by side) — Settings → Data →
+   "Reveal models in Finder…" also proves the (now dual-purpose) reveal affordance
+   still works.
+5. Tail `logs/app.log`: after the Qwen phase reaches `.ready`, confirm a
+   `"LLM Sidecar: state -> ..."` sequence ending in `ready(port: ...)` — proof
+   `startProductionSidecar(model:)` brought up the real Sidecar with the real
+   provisioned model, no manual placement, no env var.
+6. **Resume test:** quit Aide (⌘Q) mid-Qwen-download (after the speech-model phase has
+   already finished, so the tier step is sitting on "Step 2 of 2"), relaunch, walk back
+   to the tier step (it re-shows the picker — a fresh launch always re-confirms the
+   Tier), tap **Continue** again, and confirm the byte counter jumps straight to
+   roughly where you quit rather than restarting from 0.
+7. **Corrupt/not-ready test:** interrupt the Qwen download (step 6) and, instead of
+   resuming, hand-corrupt the partial blob (flip a byte) or delete `.download-state.json`
+   so a resume-then-verify mismatches; confirm the tier step surfaces "The downloaded
+   language model didn't match its checksum and may be corrupted. Try again." (never a
+   crash), with working **Retry** / **Continue anyway** affordances.
+8. **Skip test:** after a full successful run, quit and relaunch Aide. Onboarding should
+   not reappear at all (already completed) — to specifically re-exercise the
+   skip-if-verified path, temporarily reset `settings.onboarding.completed` to `false`
+   in `settings.json`, relaunch, and confirm the tier step goes checking → `.ready`
+   for both phases near-instantly, with no network activity.
+
+### Manual full-vertical test (P2a Phase 5 — run by hand, not automated)
 
 This is the one test that needs a real ~1.5 GB download and a real microphone, so it is
 **not** part of any automated gate. Run it once per Phase-5-affecting change, on a machine
@@ -314,7 +357,7 @@ where Aide has never run before (or after deleting `~/Library/Application Suppor
    "Downloading the `<tier>` speech model…" with a progress bar and a growing
    `X of Y` byte count → "Verifying the download…" → the step auto-advances.
 4. Confirm the blob landed under `~/Library/Application Support/Aide/models/` (Settings →
-   Data → "Reveal speech models in Finder…" also proves the reveal affordance works) and
+   Data → "Reveal models in Finder…" also proves the reveal affordance works) and
    that `.download-state.json` is gone or shows `offset == byteSize` (no `.tmp` sibling).
 5. Finish onboarding, then hold the dictation hotkey and speak a short sentence. Release —
    a real transcript of what you said should appear in the Overlay (not canned text).

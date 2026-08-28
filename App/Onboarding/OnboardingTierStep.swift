@@ -5,13 +5,19 @@ import SpeechToText
 import SwiftUI
 
 /// Step 2 — RAM detection with a proposed model Tier the user can confirm or override,
-/// then the real Phase 5 provisioning of that Tier's Whisper model (User Stories 12, 13,
-/// 15, 17, 18, 19): tapping Continue persists the confirmed Tier and kicks off
-/// `AppCoordinator.confirmSttTier(_:)`, which skips instantly if the model is already
-/// downloaded and verified, else downloads → verifies. This view renders whichever phase
-/// `coordinator.sttModelProvisioningState` reports — honest progress, an actionable
-/// failure (Retry / Continue anyway), or nothing yet (still the picker) — and the
-/// coordinator auto-advances onboarding the moment the model is `.ready`.
+/// then the real provisioning of that Tier's Whisper *and* Qwen models (P2a Phase 5 /
+/// P2b Phase 5; User Stories 10-15, 17, 18, 19): tapping Continue persists the confirmed
+/// Tier and kicks off `AppCoordinator.confirmModelTier(_:)`, which downloads Whisper
+/// first (skipping instantly if already verified), then chains straight into the Qwen
+/// download the moment Whisper verifies — one honest progress bar in flight at a time,
+/// labelled "Step 1 of 2" / "Step 2 of 2" so the user is never confused about which
+/// model is downloading or how much is left.
+///
+/// This view renders whichever phase is currently active —
+/// `coordinator.llmModelProvisioningState` takes priority once non-nil (Whisper already
+/// verified), else `coordinator.sttModelProvisioningState`, else the tier picker — and
+/// the coordinator auto-advances onboarding once BOTH models are `.ready` and the real
+/// Sidecar has started with the provisioned Qwen model.
 struct OnboardingTierStep: View {
     @ObservedObject var coordinator: AppCoordinator
 
@@ -42,8 +48,10 @@ struct OnboardingTierStep: View {
             Text("Aide detected \(detectedRAM) of RAM and recommends the \(recommendedTier.displayName) tier.")
                 .foregroundStyle(.secondary)
 
-            if let state = coordinator.sttModelProvisioningState {
-                provisioningView(for: state)
+            if let llmState = coordinator.llmModelProvisioningState {
+                provisioningView(for: llmState, phase: .llm)
+            } else if let sttState = coordinator.sttModelProvisioningState {
+                provisioningView(for: sttState, phase: .stt)
             } else {
                 pickerView
             }
@@ -64,15 +72,18 @@ struct OnboardingTierStep: View {
             .pickerStyle(.radioGroup)
             .labelsHidden()
 
-            Text("Aide downloads the speech model for this tier once, verifies it, and keeps it on disk for next time.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Text(
+                "Aide downloads the speech and language models for this tier once, verifies them, "
+                    + "and keeps them on disk for next time."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
 
             HStack {
                 Spacer()
                 Button("Continue") {
                     logTierConfirmation()
-                    coordinator.confirmSttTier(selectedTier)
+                    coordinator.confirmModelTier(selectedTier)
                 }
                 .keyboardShortcut(.defaultAction)
             }
@@ -81,15 +92,46 @@ struct OnboardingTierStep: View {
 
     // MARK: - Provisioning in flight / done / failed
 
+    /// Which of the two sequential downloads a `ModelProvisioner.State` belongs to —
+    /// drives the "Step 1 of 2"/"Step 2 of 2" heading and per-phase Retry targeting.
+    private enum ModelPhase {
+        case stt
+        case llm
+
+        var stepHeading: String {
+            switch self {
+            case .stt: return "Step 1 of 2 — Speech Model"
+            case .llm: return "Step 2 of 2 — Language Model"
+            }
+        }
+
+        var modelName: String {
+            switch self {
+            case .stt: return "speech model"
+            case .llm: return "language model"
+            }
+        }
+    }
+
     @ViewBuilder
-    private func provisioningView(for state: ModelProvisioner.State) -> some View {
+    private func provisioningView(for state: ModelProvisioner.State, phase: ModelPhase) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(phase.stepHeading)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            phaseBody(for: state, phase: phase)
+        }
+    }
+
+    @ViewBuilder
+    private func phaseBody(for state: ModelProvisioner.State, phase: ModelPhase) -> some View {
         switch state {
         case .checking:
-            statusRow("Checking for an already-downloaded model…")
+            statusRow("Checking for an already-downloaded \(phase.modelName)…")
 
         case .downloading(let bytesWritten, let totalBytes):
             VStack(alignment: .leading, spacing: 8) {
-                statusRow("Downloading the \(selectedTier.displayName) speech model…")
+                statusRow("Downloading the \(selectedTier.displayName) \(phase.modelName)…")
                 ProgressView(value: Double(bytesWritten), total: Double(max(totalBytes, 1)))
                 Text("\(formattedBytes(bytesWritten)) of \(formattedBytes(totalBytes))")
                     .font(.caption)
@@ -100,24 +142,30 @@ struct OnboardingTierStep: View {
             statusRow("Verifying the download…")
 
         case .ready:
-            // Transient — `AppCoordinator` auto-advances past this step the instant it
-            // observes `.ready`, so this rarely renders for more than a frame.
-            statusRow("Speech model ready.")
+            // Transient — the coordinator immediately starts the next phase (stt -> llm)
+            // or auto-advances onboarding (llm -> done), so this rarely renders for more
+            // than a frame.
+            statusRow("\(phase.modelName.capitalized) ready.")
 
         case .failed(let failure):
             VStack(alignment: .leading, spacing: 12) {
-                Label(message(for: failure), systemImage: "exclamationmark.triangle")
+                Label(message(for: failure, phase: phase), systemImage: "exclamationmark.triangle")
                     .foregroundStyle(.orange)
                 HStack {
-                    Button("Retry") {
-                        coordinator.retrySttModelProvisioning()
-                    }
+                    Button("Retry") { retry(phase: phase) }
                     Spacer()
                     Button("Continue anyway") {
                         coordinator.onboardingAdvance()
                     }
                 }
             }
+        }
+    }
+
+    private func retry(phase: ModelPhase) {
+        switch phase {
+        case .stt: coordinator.retrySttModelProvisioning()
+        case .llm: coordinator.retryLlmModelProvisioning()
         }
     }
 
@@ -129,15 +177,15 @@ struct OnboardingTierStep: View {
     }
 
     /// A human-readable, actionable message for every non-ready outcome (User Story 19 —
-    /// "speech model not ready" is always a clear state, never a crash or silent failure).
-    private func message(for failure: ModelProvisioner.Failure) -> String {
+    /// a model that isn't ready is always a clear state, never a crash or silent failure).
+    private func message(for failure: ModelProvisioner.Failure, phase: ModelPhase) -> String {
         switch failure {
         case .downloadFailed:
-            return "Couldn't download the speech model. Check your internet connection and try again."
+            return "Couldn't download the \(phase.modelName). Check your internet connection and try again."
         case .verificationFailed:
-            return "The downloaded speech model didn't match its checksum and may be corrupted. Try again."
+            return "The downloaded \(phase.modelName) didn't match its checksum and may be corrupted. Try again."
         case .notReady:
-            return "The speech model isn't ready yet."
+            return "The \(phase.modelName) isn't ready yet."
         }
     }
 
@@ -149,8 +197,8 @@ struct OnboardingTierStep: View {
         ByteCountFormatter.string(fromByteCount: count, countStyle: .file)
     }
 
-    /// Leaves a trace of the confirm/override decision in `app.log`, same as before Phase 5
-    /// (now confirming a Tier that actually drives a real download, not just a placeholder).
+    /// Leaves a trace of the confirm/override decision in `app.log`, same as before
+    /// P2b Phase 5 (the one confirmed Tier now drives both the Whisper and Qwen downloads).
     private func logTierConfirmation() {
         let disposition = selectedTier == recommendedTier ? "confirmed" : "overridden to"
         coordinator.appLog?.log(

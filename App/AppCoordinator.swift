@@ -19,10 +19,9 @@ import os
 /// the menubar renders. `AppDelegate` delegates lifecycle ownership here rather
 /// than holding everything ad hoc (specs/P1 §"AppCoordinator"; User Stories 3, 4, 36).
 ///
-/// This primary declaration holds lifecycle wiring + shared state; two cohesive
-/// concern-groups live in same-type extensions so no single file/type grows
-/// unwieldy: persisted settings mutations (`AppCoordinator+SettingsMutation.swift`)
-/// and the first-run onboarding flow (`AppCoordinator+Onboarding.swift`).
+/// This primary declaration holds lifecycle wiring + shared state; cohesive
+/// concern-groups live in same-type extensions instead (settings mutation, onboarding,
+/// model provisioning, the Sidecar) so no single file/type grows unwieldy.
 final class AppCoordinator: ObservableObject {
 
     /// Human-readable status surfaced in the menubar menu (User Stories 3, 10).
@@ -75,9 +74,10 @@ final class AppCoordinator: ObservableObject {
         capture: AudioCapture(),
         preGate: SegmentPreGate(thresholds: .provisional))
 
-    /// Progress/failure/ready state of the onboarding-triggered model download (Phase 5;
-    /// User Stories 15, 19); `nil` until `confirmSttTier(_:)` starts one.
+    /// Progress/failure/ready state of the onboarding-triggered Whisper (`stt`) and
+    /// Qwen (`llm`) downloads (Phase 5); `nil` until `confirmModelTier(_:)` starts each.
     @Published var sttModelProvisioningState: ModelProvisioner.State?
+    @Published var llmModelProvisioningState: ModelProvisioner.State?
 
     /// The in-flight provisioning task, if any — cancelled/replaced on Retry.
     var sttModelProvisioningTask: Task<Void, Never>?
