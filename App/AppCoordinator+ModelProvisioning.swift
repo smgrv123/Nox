@@ -36,24 +36,28 @@ extension AppCoordinator {
                     .appending(path: "Aide", directoryHint: .isDirectory))
     }()
 
+    /// The onboarding-confirmed Tier parsed from the persisted raw value, or `nil` when the
+    /// user hasn't confirmed yet (letting policies fall back to RAM detection).
+    private var resolvedTierOverride: SttTierPolicy.Tier? {
+        settings.modelTier.flatMap(SttTierPolicy.Tier.init(rawValue:))
+    }
+
     /// The confirmed-or-detected Whisper `ModelDescriptor` `voiceDriver` loads from disk
     /// (Phase 5; retires Phase 1's hardcoded `ggml-base.en.bin` path; User Story 18): the
-    /// onboarding-confirmed Tier (`settings.sttModelTier`) wins when present, else the Tier
+    /// onboarding-confirmed Tier (`settings.modelTier`) wins when present, else the Tier
     /// detected from physical RAM — exactly `SttTierPolicy`'s override contract.
     var resolvedSttModelDescriptor: ModelDescriptor {
-        let override = settings.sttModelTier.flatMap(SttTierPolicy.Tier.init(rawValue:))
-        return SttTierPolicy.whisperModel(
-            physicalMemoryBytes: ProcessInfo.processInfo.physicalMemory, override: override)
+        SttTierPolicy.whisperModel(
+            physicalMemoryBytes: ProcessInfo.processInfo.physicalMemory, override: resolvedTierOverride)
     }
 
     /// The confirmed-or-detected Qwen `ModelDescriptor` the Sidecar loads (P2b Phase 5):
     /// the exact same Tier and override contract as `resolvedSttModelDescriptor` — HLD §4.3
     /// ties one Whisper model *and* one Qwen model to the same RAM row, so both read the
-    /// same persisted `settings.sttModelTier`; there is no separate `llmModelTier` setting.
+    /// same persisted `settings.modelTier`; there is no separate `llmModelTier` setting.
     var resolvedLlmModelDescriptor: ModelDescriptor {
-        let override = settings.sttModelTier.flatMap(SttTierPolicy.Tier.init(rawValue:))
-        return LlmTierPolicy.qwenModel(
-            physicalMemoryBytes: ProcessInfo.processInfo.physicalMemory, override: override)
+        LlmTierPolicy.qwenModel(
+            physicalMemoryBytes: ProcessInfo.processInfo.physicalMemory, override: resolvedTierOverride)
     }
 
     /// Onboarding's tier-confirm action (User Stories 10-15, 18): persist the user's
@@ -62,7 +66,7 @@ extension AppCoordinator {
     /// once Whisper verifies, `handleSttProvisioning(_:)` below chains straight into the
     /// Qwen download, so the user only taps Continue once for both models.
     func confirmModelTier(_ tier: SttTierPolicy.Tier) {
-        updateSettings { $0.sttModelTier = tier.rawValue }
+        updateSettings { $0.modelTier = tier.rawValue }
         provisionSttModel(descriptor: SttTierPolicy.whisperModel(for: tier))
     }
 
@@ -87,54 +91,72 @@ extension AppCoordinator {
         NSWorkspace.shared.activateFileViewerSelecting([AppCoordinator.modelsDirectory.revealInFinderURL])
     }
 
-    // MARK: - Whisper (STT)
+    // MARK: - Provisioning core
 
-    /// Drive the pure `ModelProvisioner` against the real downloader/verifier for the
-    /// Whisper descriptor, publishing every phase to `sttModelProvisioningState`. Cancels
-    /// any prior in-flight attempt first so Retry can never race a stale download.
-    private func provisionSttModel(descriptor: ModelDescriptor) {
-        sttModelProvisioningTask?.cancel()
+    /// Shared provisioning driver: cancel any prior in-flight attempt, build a fresh
+    /// `ModelProvisioner`, and launch a new `Task` that publishes every phase through
+    /// `handler`. Both `provisionSttModel` and `provisionLlmModel` delegate here.
+    private func provisionModel(
+        descriptor: ModelDescriptor,
+        cancelExisting: () -> Void,
+        storeTask: @escaping (Task<Void, Never>) -> Void,
+        handler: @MainActor @Sendable @escaping (ModelProvisioner.State) -> Void
+    ) {
+        cancelExisting()
         let provisioner = ModelProvisioner(
             downloader: ModelDownloader(),
             verifier: LiveModelVerifier(),
             modelsDirectory: AppCoordinator.modelsDirectory)
 
-        sttModelProvisioningTask = Task { [weak self] in
+        let task = Task { [weak self] in
+            guard self != nil else { return }
             _ = await provisioner.provision(descriptor: descriptor) { state in
-                Task { @MainActor in self?.handleSttProvisioning(state) }
+                Task { @MainActor in handler(state) }
             }
         }
+        storeTask(task)
     }
 
-    /// Once Whisper reaches `.ready`, chain straight into Qwen (sequential — one progress
-    /// bar in flight at a time, never two at once). A `.failed`/`.checking`/`.downloading`/
-    /// `.verifying` state never auto-starts Qwen or advances onboarding — the user drives
-    /// those outcomes via Retry / "Continue anyway" (`OnboardingTierStep`).
+    // MARK: - Whisper (STT)
+
+    /// Drive the pure `ModelProvisioner` for the Whisper descriptor, publishing every phase
+    /// to `sttModelProvisioningState`. Cancels any prior in-flight attempt first so Retry
+    /// can never race a stale download.
+    private func provisionSttModel(descriptor: ModelDescriptor) {
+        provisionModel(
+            descriptor: descriptor,
+            cancelExisting: { [self] in sttModelProvisioningTask?.cancel() },
+            storeTask: { [self] in sttModelProvisioningTask = $0 },
+            handler: { [weak self] state in self?.handleSttProvisioning(state) }
+        )
+    }
+
+    /// Once Whisper reaches `.ready` **during onboarding's tier step**, chain straight into
+    /// Qwen (sequential — one progress bar in flight at a time, never two at once). The
+    /// `.tier` guard ensures a standalone STT retry outside onboarding never accidentally
+    /// kicks off a Qwen download. A `.failed`/`.checking`/`.downloading`/`.verifying` state
+    /// never auto-starts Qwen or advances onboarding — the user drives those outcomes via
+    /// Retry / "Continue anyway" (`OnboardingTierStep`).
     @MainActor
     private func handleSttProvisioning(_ state: ModelProvisioner.State) {
         sttModelProvisioningState = state
-        if case .ready = state {
+        if case .ready = state, onboardingFlow?.currentStep == .tier {
             provisionLlmModel(descriptor: resolvedLlmModelDescriptor)
         }
     }
 
     // MARK: - Qwen (LLM)
 
-    /// Drive the pure `ModelProvisioner` against the real downloader/verifier for the
-    /// Qwen descriptor, publishing every phase to `llmModelProvisioningState`. Cancels any
-    /// prior in-flight attempt first — same contract as `provisionSttModel`.
+    /// Drive the pure `ModelProvisioner` for the Qwen descriptor, publishing every phase to
+    /// `llmModelProvisioningState`. Cancels any prior in-flight attempt first — same
+    /// contract as `provisionSttModel`.
     private func provisionLlmModel(descriptor: ModelDescriptor) {
-        llmModelProvisioningTask?.cancel()
-        let provisioner = ModelProvisioner(
-            downloader: ModelDownloader(),
-            verifier: LiveModelVerifier(),
-            modelsDirectory: AppCoordinator.modelsDirectory)
-
-        llmModelProvisioningTask = Task { [weak self] in
-            _ = await provisioner.provision(descriptor: descriptor) { state in
-                Task { @MainActor in self?.handleLlmProvisioning(state, descriptor: descriptor) }
-            }
-        }
+        provisionModel(
+            descriptor: descriptor,
+            cancelExisting: { [self] in llmModelProvisioningTask?.cancel() },
+            storeTask: { [self] in llmModelProvisioningTask = $0 },
+            handler: { [weak self] state in self?.handleLlmProvisioning(state, descriptor: descriptor) }
+        )
     }
 
     /// Once Qwen verifies, bring the real Sidecar up with it (User Stories 10-15;
@@ -152,10 +174,3 @@ extension AppCoordinator {
         }
     }
 }
-
-/// The in-flight Qwen provisioning task, if any — cancelled/replaced on Retry. A
-/// file-private global rather than an `AppCoordinator` stored property:
-/// `AppCoordinator.swift` is already at SwiftLint's file-length ceiling (same reasoning
-/// as `AppCoordinator+Sidecar.swift`'s `sidecarManagerInstance`), and this bookkeeping
-/// var is only ever touched from this file.
-private var llmModelProvisioningTask: Task<Void, Never>?

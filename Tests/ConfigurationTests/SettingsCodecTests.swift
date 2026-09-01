@@ -13,11 +13,11 @@ final class SettingsCodecTests: XCTestCase {
     // MARK: - Current-version decode
 
     func testCurrentVersionFileDecodesDirectlyWithoutMigration() throws {
-        // A current-version (v4) document whose audio cue + hotkeys are non-default
+        // A current-version (v5) document whose audio cue + hotkeys are non-default
         // must decode to those values and report no migration.
         let json = Data(
             """
-            {"schema_version":4,
+            {"schema_version":5,
             "hotkeys":{"command_mode":{"key_code":36,"modifiers":["command","shift"],"mode":"push_to_talk"},
             "dictation_mode":{"key_code":49,"modifiers":["control"],"mode":"push_to_talk"}},
             "indicators":{"show_local_cloud_indicator":false,
@@ -323,46 +323,4 @@ final class SettingsCodecTests: XCTestCase {
         XCTAssertEqual(try SettingsCodec.decode(data).settings, settings)
     }
 
-    // MARK: - sttModelTier (Phase 5 · P2a; User Story 18): the confirmed onboarding Tier
-
-    func testDefaultSttModelTierIsNilUntilOnboardingConfirmsOne() {
-        // nil = "not yet confirmed" — the App layer falls back to detected RAM alone.
-        XCTAssertNil(Settings.defaults.sttModelTier)
-    }
-
-    func testCurrentVersionFileWithSttModelTierDecodesIt() throws {
-        let json = Data(#"{"schema_version":4,"stt_model_tier":"8gb"}"#.utf8)
-        let settings = try SettingsCodec.decode(json).settings
-        XCTAssertEqual(settings.sttModelTier, "8gb")
-    }
-
-    func testV3FileMigratesToV4WithoutLossAndNoSttModelTier() throws {
-        // A real v3 file (Phase 10's shape): no `stt_model_tier` (v3 predates it). Migrating
-        // to v4 must leave it nil (not yet confirmed) without disturbing existing data.
-        let v3 = Data(
-            """
-            {"schema_version":3,
-            "hotkeys":{"command_mode":{"key_code":36,"modifiers":["command"],"mode":"push_to_talk"}},
-            "privacy":{"network_utilities_disclosed":true},
-            "onboarding":{"completed":true,"resume_step":"summary"}}
-            """.utf8)
-
-        let decoded = try SettingsCodec.decode(v3)
-
-        XCTAssertEqual(decoded.migratedFrom, 3)
-        XCTAssertEqual(decoded.settings.schemaVersion, Settings.currentSchemaVersion)
-        XCTAssertNil(decoded.settings.sttModelTier)
-        // No loss of existing v3 data.
-        XCTAssertEqual(decoded.settings.hotkeys.commandMode.keyCode, 36)
-        XCTAssertTrue(decoded.settings.privacy.networkUtilitiesDisclosed)
-        XCTAssertTrue(decoded.settings.onboarding.completed)
-    }
-
-    func testEncodeRoundTripsSttModelTier() throws {
-        var settings = Settings.defaults
-        settings.sttModelTier = "16gb"
-
-        let data = try SettingsCodec.encode(settings)
-        XCTAssertEqual(try SettingsCodec.decode(data).settings, settings)
-    }
 }

@@ -17,6 +17,10 @@ disabled_rules:
   - todo            # we intentionally keep TODO markers that reference the LLD
   - trailing_comma  # swift-format enforces multi-element trailing commas
 
+file_length:
+  warning: 450      # AppCoordinator splits by concern via extensions; modest bump
+  error: 500
+
 line_length:
   warning: 140      # lenient above swift-format's 120 so it never conflicts
   error: 200

@@ -36,11 +36,6 @@ import Persistence
 /// two actually ran a given launch (in practice mutually exclusive: the dev hook only
 /// fires when a developer explicitly sets `AIDE_RUN_SIDECAR_CHECK=1`).
 ///
-/// The manager's handle is a file-private global, not an `AppCoordinator` stored
-/// property: `AppCoordinator.swift` is already at SwiftLint's file-length ceiling, and
-/// neither caller needs it visible outside this file.
-private var sidecarManagerInstance: SidecarManager?
-
 extension AppCoordinator {
 
     /// Called once from `applicationDidFinishLaunching()`. No-ops unless
@@ -192,8 +187,8 @@ private func resolveSidecarCheckConfig(
 /// Poll `manager.state` (no real sleep budget wasted — `SidecarLifecycleController`
 /// already logs every transition via `onStateChange`, this just waits for the terminal
 /// one that matters here) until `.ready` yields a usable endpoint, `.failed` gives up, or
-/// `timeout` elapses. A free function, not an `AppCoordinator` method, for the same
-/// file-length reason `sidecarManagerInstance` is a file-private global above.
+/// `timeout` elapses. A file-private free function — kept out of `AppCoordinator`'s
+/// extension to stay within SwiftLint's function-body-length ceiling.
 private func waitForSidecarReady(
     _ manager: SidecarManager,
     appLog: AppLog?,

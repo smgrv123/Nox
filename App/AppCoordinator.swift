@@ -3,6 +3,7 @@ import AppKit
 import AppLifecycle
 import Configuration
 import Hotkeys
+import LLMRuntime
 import ModelProvisioning
 import Onboarding
 import Overlay
@@ -67,7 +68,7 @@ final class AppCoordinator: ObservableObject {
     /// `AideCore.VoiceSessionDriver`, swapped in for `MockVoiceSessionDriver` with no change
     /// to `VoiceSessionCoordinator`/Overlay. Constructing it opens nothing (mic opens only
     /// on a hold; model loads lazily; an absent model fails safe, not a crash). `lazy`, not
-    /// `let` (Phase 5): the model path depends on `settings.sttModelTier`, not loaded yet at
+    /// `let` (Phase 5): the model path depends on `settings.modelTier`, not loaded yet at
     /// construction time — only once `setUpStorage()` runs. Mirrors `voiceSession` below.
     private lazy var voiceDriver = STTVoiceSessionDriver(
         engine: WhisperSTTEngine(modelURL: AppCoordinator.modelsDirectory.blobURL(for: resolvedSttModelDescriptor)),
@@ -81,6 +82,14 @@ final class AppCoordinator: ObservableObject {
 
     /// The in-flight provisioning task, if any — cancelled/replaced on Retry.
     var sttModelProvisioningTask: Task<Void, Never>?
+
+    /// The in-flight Qwen provisioning task, if any — cancelled/replaced on Retry.
+    var llmModelProvisioningTask: Task<Void, Never>?
+
+    /// The shared `SidecarManager` handle — used by both the dev-check hook and the
+    /// production path (`startProductionSidecar`); teardown reads it via
+    /// `applicationShouldTerminate`.
+    var sidecarManagerInstance: SidecarManager?
 
     /// Orchestrates hotkey → Overlay → `voiceDriver` → Overlay (docs/04-hld.md §13,
     /// docs/05-lld.md §10). `lazy` because its `emit` sink is `overlay.send` and its

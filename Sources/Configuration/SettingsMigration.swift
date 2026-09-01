@@ -89,6 +89,18 @@ enum SettingsMigrator {
                 migrated["schema_version"] = 4
                 return migrated
             },
+            // v4 → v5. v5 renames the top-level `stt_model_tier` key to `model_tier` — the
+            // single Tier now governs both STT (Whisper) and LLM (Qwen) model selection, so
+            // the STT-specific name was misleading. The value is carried over intact; an absent
+            // key (nil = "not yet confirmed") stays absent.
+            SettingsMigration(from: 4, to: 5) { v4 in
+                var migrated = v4
+                if let value = migrated.removeValue(forKey: "stt_model_tier") {
+                    migrated["model_tier"] = value
+                }
+                migrated["schema_version"] = 5
+                return migrated
+            },
         ]
     }
 
