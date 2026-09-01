@@ -54,4 +54,7 @@ public protocol SidecarController: Actor {
     /// tier-swap semantics (a dedicated in-flight state, Session Context preservation)
     /// are Phase 6's job.
     func swapModel(to model: ModelDescriptor) async throws
+    /// Signal that the Sidecar was just used (Phase 6; LLD §5.4). Resets the
+    /// idle-unload timer so an 8GB-tier Sidecar stays resident while active.
+    func recordActivity()
 }

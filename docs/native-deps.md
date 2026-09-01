@@ -191,7 +191,7 @@ Both pinned to the same HF commit revision (`docs/04-hld.md` §4.3's Tier→mode
 | --- | --- | --- |
 | Repo | [`ggerganov/whisper.cpp`](https://huggingface.co/ggerganov/whisper.cpp) | same |
 | Revision | `5359861c739e955e79d9a303bcbc70fb988958b1` | same |
-| Filename | `ggml-large-v3-turbo.bin` | `ggml-small.bin` (**multilingual** — not `.en`, needed for `.auto` Hindi/code-mixed detection) |
+| Filename | `ggml-large-v3-turbo.bin` (requires forced-English language mode + peak-normalized audio — see `STTVoiceSessionDriver`) | `ggml-small.bin` (**multilingual** — not `.en`, needed for `.auto` Hindi/code-mixed detection) |
 | SHA-256 | `1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69` | `1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b` |
 | Byte size | 1,624,555,275 (~1.51 GiB) | 487,601,967 (~465 MiB) |
 | Download URL | `https://huggingface.co/ggerganov/whisper.cpp/resolve/<revision>/ggml-large-v3-turbo.bin` | `https://huggingface.co/ggerganov/whisper.cpp/resolve/<revision>/ggml-small.bin` |
@@ -371,3 +371,59 @@ where Aide has never run before (or after deleting `~/Library/Application Suppor
 8. Also run the opt-in integration check (`AIDE_RUN_STT_INTEGRATION=1 swift test --filter
    WhisperSTTEngineIntegrationTests`, spike model placed) to confirm the sample-WAV →
    transcript → Pre-Gate path is still green.
+
+### Manual idle-unload verification (P2b Phase 6)
+
+Verifies LLD §5.4 Model Residency: 8GB tier unloads the Sidecar after an idle period and
+reloads on the next request; 16GB stays resident unconditionally. The pure decision logic
+(`IdleUnloadPolicy`) is headlessly tested in `IdleUnloadPolicyTests` (10 tests) and the
+lifecycle integration is tested in `IdleUnloadLifecycleTests` (5 tests) — both part of the
+normal `just test` gate, no real process or network. This section covers the real effectful
+wiring that can only be confirmed by a person watching real process behavior.
+
+**How idle-unload works (Phase 6 architecture):** The `Tier` is passed to
+`SidecarLifecycleController` at construction time (via the `SidecarManager` convenience
+init in `App/SidecarManager.swift`). While the engine is in `.ready`, its existing
+`pollWhileReady` loop evaluates `IdleUnloadPolicy.decide(tier:idleInterval:threshold:)` on
+every tick — if it returns `.unload`, the engine terminates the process and settles into
+`.stopped` (not `.failed`). `SidecarLifecycleController.recordActivity()` resets the idle
+timer; `AppCoordinator+Sidecar.swift`'s `noteLLMActivity()` calls it and, if the Sidecar
+was idle-unloaded (`.stopped`), restarts it via `startIfNeeded(model:)`.
+
+**Prerequisites:** a completed onboarding run with a real Qwen model provisioned (Phase 5's
+manual full-vertical test above), so the production Sidecar has a model to start with.
+
+#### 8GB verification (forced via settings override)
+
+1. Open `~/Library/Application Support/Aide/settings.json` and set `"model_tier": "8gb"`
+   (this forces the 8GB code path regardless of actual RAM — same override mechanism
+   `TierPolicy.tier(override:)` and `LlmTierPolicy` use).
+2. Build and launch: `just run`.
+3. Walk onboarding to completion (or, if already completed, relaunch). Confirm the Sidecar
+   starts: `tail -f ~/Library/Application\ Support/Aide/logs/app.log` should show
+   `"LLM Sidecar: state -> launching"` then `"LLM Sidecar: state -> ready(port: ...)"`.
+4. Wait for the idle threshold to elapse (default: 5 minutes / 300s) **without making any
+   LLM request**. Watch `app.log` for `"LLM Sidecar: state -> stopped"` — proof the
+   `SidecarLifecycleController`'s idle-unload triggered from within its ready-poll loop.
+5. Confirm the `llama-server` process is gone: `pgrep -fl llama-server` should return
+   nothing.
+6. Trigger a new LLM request (once P4/P5/P6 provide a real consumer; until then, restart
+   the app with `AIDE_RUN_SIDECAR_CHECK=1` to simulate activity — the dev hook's
+   `SidecarManager` creation re-exercises the launch path). Watch `app.log` for
+   `"Idle-unload: reloading Sidecar on new LLM request."` followed by the normal
+   `launching` → `ready(port: ...)` sequence — proof the reload works with a brief
+   visible loading state.
+7. Restore `settings.json` to the real tier (`"model_tier": "16gb"` or remove the
+   override) when done.
+
+#### 16GB verification
+
+1. Ensure `settings.json` has `"model_tier": "16gb"` (or no override on a ≥16GB machine).
+2. Build, launch, and complete onboarding. Confirm the Sidecar reaches `ready`.
+3. Wait well past the idle threshold (e.g. 10 minutes). The `SidecarLifecycleController`'s
+   ready-poll loop evaluates `IdleUnloadPolicy` on each tick, but with `tier: .tier16GB`
+   the policy always returns `.resident` — the idle-unload check is a no-op.
+4. Confirm `app.log` has **no** `"state -> stopped"` log lines after the initial
+   `"state -> ready(port: ...)"` and `pgrep -fl llama-server` still shows the running
+   process — the Sidecar stayed resident.
+5. Any follow-up LLM request should be served immediately without a reload sequence.

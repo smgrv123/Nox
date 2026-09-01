@@ -133,22 +133,34 @@ public final class STTVoiceSessionDriver: VoiceSessionDriver {
     private func resolve(_ pcm: PCMBuffer, mode: VoiceSessionMode, generation: Int) async {
         do {
             try await engine.ensureLoaded()
-            let transcription = try await engine.transcribe(pcm, language: .auto, initialPrompt: nil)
+            let normalized = Self.peakNormalize(pcm)
+            let transcription = try await engine.transcribe(normalized, language: .auto, initialPrompt: nil)
             guard self.generation == generation else { return }
 
             switch preGate.evaluate(transcription, mode: mode) {
             case .pass(let text, _):
-                // The recognized words appear first (rendered while `.processing`), then a
-                // placeholder `.result` — routing (a real summary) arrives in P4.
                 deliver(.transcript(text), generation: generation)
                 deliver(.result(VoiceSessionResult(transcript: text, summary: text)), generation: generation)
             case .fail:
                 deliver(.result(Self.degraded(Self.reAskSummary)), generation: generation)
             }
         } catch {
-            // Model absent/corrupt or decode failure — surface a clear state, never crash.
             deliver(.result(Self.degraded(Self.modelNotReadySummary)), generation: generation)
         }
+    }
+
+    /// Peak-normalize PCM so Whisper sees a consistent signal level regardless of
+    /// hardware mic gain. Target peak is 0.9 (headroom against clipping). Only
+    /// amplifies quiet audio — loud audio is returned unchanged. A near-silent buffer
+    /// (maxAmp < 0.001) is also returned unchanged to avoid amplifying pure noise.
+    /// Gain is capped at 20× to prevent extreme amplification of very quiet signals.
+    private static func peakNormalize(_ pcm: PCMBuffer) -> PCMBuffer {
+        let targetPeak: Float = 0.9
+        let maxAmp = pcm.samples.reduce(Float(0)) { max($0, abs($1)) }
+        guard maxAmp > 0.001 else { return pcm }
+        let gain = min(targetPeak / maxAmp, 20.0)
+        guard gain > 1.05 else { return pcm }
+        return PCMBuffer(samples: pcm.samples.map { $0 * gain }, sampleRate: pcm.sampleRate)
     }
 
     /// Deliver one update on the main actor, unless a newer session has superseded this

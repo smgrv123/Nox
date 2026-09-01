@@ -46,9 +46,10 @@ extension ModelDescriptor {
     /// multi-GB blob; cross-checked against the `resolve` endpoint's `X-Repo-Commit`).
     private static let productionRevision = "5359861c739e955e79d9a303bcbc70fb988958b1"
 
-    /// 16GB-tier Whisper model (docs/04-hld.md §4.3; Phase 5 — real pin, replacing the
-    /// Phase 4 placeholder). SHA-256/size are the HF tree API's `lfs.oid`/`lfs.size` for
-    /// `ggml-large-v3-turbo.bin` at `productionRevision` (docs/native-deps.md).
+    /// 16GB-tier Whisper model (docs/04-hld.md §4.3; Phase 5 — real pin). SHA-256/size
+    /// from the HF tree API's `lfs.oid`/`lfs.size` at `productionRevision`
+    /// (docs/native-deps.md). Requires forced-English language mode (not auto-detect)
+    /// and peak-normalized audio — see `STTVoiceSessionDriver`.
     public static let whisperLargeV3Turbo = ModelDescriptor(
         repo: "ggerganov/whisper.cpp",
         pinnedRevision: productionRevision,

@@ -9,6 +9,14 @@ import ModelProvisioning
 /// exercised headlessly in `LLMRuntimeTests` with **no real process, no real network,
 /// no real sleeps**.
 ///
+/// **Phase 6 (idle-unload):** when a `Tier` is supplied, the ready-poll loop also
+/// evaluates `IdleUnloadPolicy` on each tick — if the 8GB tier's idle threshold is
+/// exceeded, the process is terminated and the engine settles into `.stopped` (not
+/// `.failed`) so the next `startIfNeeded` relaunches cleanly. 16GB tier never
+/// idle-unloads. Callers signal activity via `recordActivity()`, which resets the
+/// idle timer. The idle-unload decision is pure (`IdleUnloadPolicy.decide`) — only
+/// the timer tick is effectful.
+///
 /// `SidecarManager` (App/, plan Phase 2's "Architectural decisions") is this same type
 /// configured with the real `llama-server` process source and a real wall-clock timer
 /// — there is deliberately no second, parallel state-machine implementation for
@@ -23,6 +31,10 @@ public actor SidecarLifecycleController: SidecarController {
     private let launchHealthTimeout: TimeInterval
     private let readyPollInterval: TimeInterval
     private let onStateChange: (@Sendable (SidecarState) -> Void)?
+
+    private let tier: Tier?
+    private let idleUnloadThreshold: TimeInterval
+    private var lastActivityAt: Date?
 
     public private(set) var state: SidecarState = .stopped
 
@@ -41,6 +53,10 @@ public actor SidecarLifecycleController: SidecarController {
     ///     healthy before treating the launch itself as a failure.
     ///   - readyPollInterval: delay between health checks while already `.ready`
     ///     (crash/hang detection — docs/05-lld.md §5.1: `Ready --> Unhealthy`).
+    ///   - tier: the confirmed model tier (Phase 6; idle-unload). When `nil`, no
+    ///     idle-unload behavior is applied (backwards-compatible with Phase 2-5).
+    ///   - idleUnloadThreshold: seconds of inactivity before an 8GB-tier Sidecar
+    ///     idle-unloads (`IdleUnloadPolicy.defaultIdleThreshold`).
     ///   - onStateChange: optional side-effect hook, invoked on every transition (the
     ///     App layer uses this to log timestamped transitions during manual
     ///     verification; tests use it to assert exact transition sequences).
@@ -51,6 +67,8 @@ public actor SidecarLifecycleController: SidecarController {
         healthPollInterval: TimeInterval = 0.3,
         launchHealthTimeout: TimeInterval = 30,
         readyPollInterval: TimeInterval = 5,
+        tier: Tier? = nil,
+        idleUnloadThreshold: TimeInterval = IdleUnloadPolicy.defaultIdleThreshold,
         onStateChange: (@Sendable (SidecarState) -> Void)? = nil
     ) {
         self.processSource = processSource
@@ -59,6 +77,8 @@ public actor SidecarLifecycleController: SidecarController {
         self.healthPollInterval = healthPollInterval
         self.launchHealthTimeout = launchHealthTimeout
         self.readyPollInterval = readyPollInterval
+        self.tier = tier
+        self.idleUnloadThreshold = idleUnloadThreshold
         self.onStateChange = onStateChange
     }
 
@@ -73,11 +93,19 @@ public actor SidecarLifecycleController: SidecarController {
     }
 
     public func startIfNeeded(model: ModelDescriptor) async throws {
+        recordActivity()
         guard lifecycleTask == nil else { return }
         currentModel = model
         attempt = 0
         lastHealthyAt = nil
         beginLifecycle(model: model)
+    }
+
+    /// Signal that the Sidecar was just used (a request completed, a chat started,
+    /// etc.) — resets the idle-unload timer so the 8GB-tier threshold starts counting
+    /// from now (Phase 6; User Story 17: "any activity resets the timer").
+    public func recordActivity() {
+        lastActivityAt = timing.now()
     }
 
     public func healthCheck() async -> Bool {
@@ -136,24 +164,20 @@ public actor SidecarLifecycleController: SidecarController {
             if let port = launchedPort, await waitForHealthy(port: port) {
                 guard !Task.isCancelled else { return }
                 setState(.ready(port: port))
-                // Marks the *start* of this ready streak — deliberately NOT paired
-                // with resetting `attempt` here. `SidecarBackoffSchedule.decide` is
-                // the only place `attempt` resets, and only once this streak has
-                // lasted > 60s (docs/05-lld.md §3.4). Resetting eagerly on every
-                // momentary `.ready` would let a rapidly flapping Sidecar (crash,
-                // relaunch, crash again within seconds) retry forever at the 1s floor
-                // instead of escalating toward `.failed` — exactly the scenario the
-                // "healthy interval > 60s" rule exists to distinguish from a
-                // genuinely-recovered one.
                 lastHealthyAt = timing.now()
+                if lastActivityAt == nil { lastActivityAt = timing.now() }
 
-                await pollWhileReady(port: port)
+                let exitReason = await pollWhileReady(port: port)
                 guard !Task.isCancelled else { return }
+
+                if exitReason == .idleUnloaded {
+                    await processSource.terminate()
+                    lifecycleTask = nil
+                    setState(.stopped)
+                    return
+                }
             }
 
-            // Reaching here means either the launch failed, health never came up, or
-            // a ready Sidecar just failed a health check — in every case, make sure
-            // nothing is left running before computing the next backoff step.
             await processSource.terminate()
             guard !Task.isCancelled else { return }
             guard await backoffOrGiveUp() else { return }
@@ -172,15 +196,35 @@ public actor SidecarLifecycleController: SidecarController {
         return false
     }
 
+    /// Why `pollWhileReady` exited — the lifecycle loop uses this to decide whether to
+    /// enter the backoff/relaunch cycle (health failure) or settle cleanly (idle unload).
+    private enum ReadyPollExit {
+        case healthFailed
+        case idleUnloaded
+        case cancelled
+    }
+
     /// While `.ready`, poll `checkHealth` every `readyPollInterval`; returns as soon as
     /// one fails (docs/05-lld.md §5.1: `Ready --> Unhealthy: health check fails /
-    /// connection refused`) or the task is cancelled.
-    private func pollWhileReady(port: Int) async {
+    /// connection refused`), the idle-unload policy says `.unload` (Phase 6), or the
+    /// task is cancelled.
+    private func pollWhileReady(port: Int) async -> ReadyPollExit {
         while !Task.isCancelled {
             await timing.wait(for: readyPollInterval)
-            if Task.isCancelled { return }
-            if !(await processSource.checkHealth(port: port)) { return }
+            if Task.isCancelled { return .cancelled }
+
+            if let tier, let lastActivity = lastActivityAt {
+                let idle = timing.now().timeIntervalSince(lastActivity)
+                let decision = IdleUnloadPolicy.decide(
+                    tier: tier, idleInterval: idle, threshold: idleUnloadThreshold)
+                if decision == .unload {
+                    return .idleUnloaded
+                }
+            }
+
+            if !(await processSource.checkHealth(port: port)) { return .healthFailed }
         }
+        return .cancelled
     }
 
     /// Consult the pure backoff schedule; either wait out the delay and return `true`

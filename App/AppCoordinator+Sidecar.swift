@@ -36,6 +36,13 @@ import Persistence
 /// two actually ran a given launch (in practice mutually exclusive: the dev hook only
 /// fires when a developer explicitly sets `AIDE_RUN_SIDECAR_CHECK=1`).
 ///
+/// **P2b Phase 6** adds idle-unload wiring (LLD §5.4): on 8GB tier, the Sidecar's
+/// `SidecarLifecycleController` evaluates `IdleUnloadPolicy` on each ready-poll tick
+/// and stops itself once the idle threshold is exceeded. `noteLLMActivity()` resets
+/// the idle timer and, if the Sidecar was idle-unloaded, restarts it — the normal
+/// `.launching` → `.ready` flow produces a brief visible loading state. 16GB tier
+/// never idle-unloads (the `Tier` is passed at construction time).
+///
 extension AppCoordinator {
 
     /// Called once from `applicationDidFinishLaunching()`. No-ops unless
@@ -80,7 +87,15 @@ extension AppCoordinator {
     /// `logs/sidecar.log`, and the real `AppCoordinator.modelsDirectory` — no env-var,
     /// no manually-placed dev GGUF. `startIfNeeded` itself is idempotent (a no-op once
     /// already launching/ready), so calling this again on a Retry-after-failure is safe.
+    ///
+    /// **Phase 6 (LLD §5.4):** the `Tier` is passed to `SidecarManager` at construction
+    /// time. On 8GB, `SidecarLifecycleController` evaluates `IdleUnloadPolicy` on each
+    /// ready-poll tick and stops the process when the idle threshold is exceeded. On
+    /// 16GB, the policy always returns `.resident` — no unload. The idle timer resets
+    /// via `recordActivity()` (called by `noteLLMActivity()` and `startIfNeeded`).
     func startProductionSidecar(model: ModelDescriptor) {
+        productionSidecarModel = model
+
         let manager: SidecarManager
         if let existing = sidecarManagerInstance {
             manager = existing
@@ -95,10 +110,15 @@ extension AppCoordinator {
                 return
             }
             let appLog = self.appLog
+            let tierOverride = settings.modelTier.flatMap(Tier.init(rawValue:))
+            let resolvedTier =
+                tierOverride
+                ?? TierPolicy.tier(physicalMemoryBytes: ProcessInfo.processInfo.physicalMemory)
             manager = SidecarManager(
                 binaryDirectory: binaryDirectory,
                 logFileURL: logFileURL,
                 modelsDirectory: AppCoordinator.modelsDirectory,
+                tier: resolvedTier,
                 onStateChange: { state in
                     appLog?.log("LLM Sidecar: state -> \(state)", level: .notice)
                 })
@@ -111,6 +131,27 @@ extension AppCoordinator {
                 try await manager.startIfNeeded(model: model)
             } catch {
                 appLog?.log("Failed to start the LLM Sidecar: \(error)", level: .error)
+            }
+        }
+    }
+
+    /// Record an LLM request, resetting the idle-unload countdown (Phase 6; LLD §5.4).
+    /// If the Sidecar was idle-unloaded (`.stopped`), restarts it — the normal
+    /// `.launching` → `.ready` flow produces a brief visible loading state. Future LLM
+    /// consumers (P4/P5/P6) call this before every request.
+    func noteLLMActivity() {
+        guard let manager = sidecarManagerInstance else { return }
+        let model = productionSidecarModel
+        let appLog = self.appLog
+        Task {
+            await manager.recordActivity()
+            let state = await manager.state
+            guard case .stopped = state, let model else { return }
+            appLog?.log("Idle-unload: reloading Sidecar on new LLM request.", level: .notice)
+            do {
+                try await manager.startIfNeeded(model: model)
+            } catch {
+                appLog?.log("Failed to restart Sidecar after idle-unload: \(error)", level: .error)
             }
         }
     }

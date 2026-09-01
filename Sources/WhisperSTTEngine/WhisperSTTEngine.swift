@@ -97,22 +97,19 @@ public actor WhisperSTTEngine: STTEngine {
         params.single_segment = false
         params.n_threads = Int32(max(1, ProcessInfo.processInfo.activeProcessorCount - 1))
 
-        // Language resolution (User Story 4 — no forced English). `.auto` truly
-        // auto-detects Hindi / code-mixed speech on a **multilingual** model (nil
-        // language + detect flag, the whisper contract) — the production path. On an
-        // English-only model (e.g. the `base.en` spike model) there is no other language
-        // to detect, so `.auto` pins its sole language `"en"`: this is honest metadata,
-        // not a hardcoded forcing of English over a capable model, and it avoids
-        // whisper's spurious auto-detect on a single-language vocab. `.explicit` always
-        // pins its code. Both C strings must outlive the `whisper_full` call, so the
-        // decode runs inside their `withCString` scopes.
+        // Language is forced to English — whisper.cpp's auto-detection on
+        // multilingual models (including large-v3-turbo) consumes the audio during
+        // the detection pass and produces 0 segments on low-gain mic input. Forcing
+        // "en" bypasses detection entirely. Revisit when whisper.cpp fixes this
+        // upstream or when multilingual support is needed (User Story 4).
+        // `.explicit` always pins its code.
         let multilingual = whisper_is_multilingual(context) != 0
         let languageCode: String?
         let detectLanguage: Bool
         switch language {
         case .auto:
-            languageCode = multilingual ? nil : "en"
-            detectLanguage = multilingual
+            languageCode = "en"
+            detectLanguage = false
         case .explicit(let code):
             languageCode = code
             detectLanguage = false

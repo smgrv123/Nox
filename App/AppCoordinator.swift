@@ -91,6 +91,10 @@ final class AppCoordinator: ObservableObject {
     /// `applicationShouldTerminate`.
     var sidecarManagerInstance: SidecarManager?
 
+    /// The model the production Sidecar was last started with — used to restart it
+    /// after an idle-unload (Phase 6; LLD §5.4).
+    var productionSidecarModel: ModelDescriptor?
+
     /// Orchestrates hotkey → Overlay → `voiceDriver` → Overlay (docs/04-hld.md §13,
     /// docs/05-lld.md §10). `lazy` because its `emit` sink is `overlay.send` and its
     /// `playCue`/`presentText` sinks close over `self` — all only valid once this

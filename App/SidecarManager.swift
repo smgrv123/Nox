@@ -30,17 +30,25 @@ extension SidecarLifecycleController {
     ///   - modelsDirectory: resolves a `ModelDescriptor` to an absolute blob path.
     ///     Real provisioning is Phase 5's job — Phase 2's manual verification hook
     ///     (`AppCoordinator+Sidecar.swift`) points this at a manually-placed dev GGUF.
+    ///   - tier: the confirmed model tier (Phase 6). On 8GB, the Sidecar idle-unloads
+    ///     after `idleUnloadThreshold`; on 16GB (or `nil`), it stays resident.
+    ///   - idleUnloadThreshold: seconds of inactivity before an 8GB-tier Sidecar
+    ///     idle-unloads (defaults to `IdleUnloadPolicy.defaultIdleThreshold`).
     ///   - onStateChange: optional transition observer (used to log timestamped
     ///     state changes during manual verification).
     init(
         binaryDirectory: URL,
         logFileURL: URL,
         modelsDirectory: ModelsDirectory,
+        tier: Tier? = nil,
+        idleUnloadThreshold: TimeInterval = IdleUnloadPolicy.defaultIdleThreshold,
         onStateChange: (@Sendable (SidecarState) -> Void)? = nil
     ) {
         self.init(
             processSource: LlamaServerProcessSource(
                 binaryDirectory: binaryDirectory, logFileURL: logFileURL, modelsDirectory: modelsDirectory),
+            tier: tier,
+            idleUnloadThreshold: idleUnloadThreshold,
             onStateChange: onStateChange)
     }
 }
