@@ -196,7 +196,7 @@ let package = Package(
         // (docs/05-lld.md §2.2, §4.2). Depends on LLMRuntime protocols, never InferenceClient.
         .target(
             name: "CommandRouter",
-            dependencies: ["SkillManifest", "LLMRuntime"]
+            dependencies: ["AideCore", "SkillManifest", "LLMRuntime"]
         ),
         // P2b Phase 4 · the pure LLM-runtime heart, playing the role `SpeechToText`
         // played for P2a: `LlmTierPolicy` (Tier → Qwen `ModelDescriptor`) today; the
@@ -319,7 +319,7 @@ let package = Package(
         ),
         .testTarget(
             name: "CommandRouterTests",
-            dependencies: ["CommandRouter", "SkillManifest", "LLMRuntime"]
+            dependencies: ["CommandRouter", "SkillManifest", "LLMRuntime", "AideCore"]
         ),
     ]
 )

@@ -25,7 +25,7 @@ final class GBNFGrammarAssemblerTests: XCTestCase {
         XCTAssertTrue(
             grammar.contains(
                 #"s-open_application ::= "\"skill_id\":" ws "\"open_application\"" "," ws "#
-                    + #"\"parameters\":" ws "{" ws "\"app_name\":" ws string ws "}""#
+                    + #""\"parameters\":" ws "{" ws "\"app_name\":" ws string ws "}""#
             ),
             "open_application alternative must pin the skill_id literal. Grammar:\n\(grammar)"
         )
@@ -195,7 +195,7 @@ final class GBNFGrammarAssemblerTests: XCTestCase {
         XCTAssertTrue(
             grammar.contains(
                 #"s-open_application ::= "\"skill_id\":" ws "\"open_application\"" "," ws "#
-                    + #"\"parameters\":" ws "{" ws "\"app_name\":" ws string ws "}""#
+                    + #""\"parameters\":" ws "{" ws "\"app_name\":" ws string ws "}""#
             ),
             "registered open_application must keep its own parameters. Grammar:\n\(grammar)"
         )

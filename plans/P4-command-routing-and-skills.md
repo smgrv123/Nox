@@ -130,17 +130,17 @@ The deterministic `ConfidenceGate` inside the `CommandRouter` module: combines P
 
 ### Acceptance criteria
 
-- [ ] `null` skill → `.promptBack` regardless of confidence
-- [ ] Schema validation fail → `.promptBack`
-- [ ] `low` tier + above floor → `.execute`
-- [ ] `low` tier + below `routeLow` → `.promptBack`
-- [ ] `confirm` tier + logprob clearly high (≥ `routeHigh`) → `.execute`
-- [ ] `confirm` tier + marginal logprob → `.confirmBack`
-- [ ] `confirm` tier + below `routeLow` → `.promptBack`
-- [ ] `always_confirm` tier + high logprob → `.confirmBack` (always, per spec)
-- [ ] `always_confirm` tier + low logprob → `.confirmBack` (still not prompt-back — the action was resolved)
-- [ ] Injected thresholds are used (not hardcoded); changing them changes the gate outcome
-- [ ] `just check` passes
+- [x] `null` skill → `.promptBack` regardless of confidence
+- [x] Schema validation fail → `.promptBack`
+- [x] `low` tier + above floor → `.execute`
+- [x] `low` tier + below `routeLow` → `.promptBack`
+- [x] `confirm` tier + logprob clearly high (≥ `routeHigh`) → `.execute`
+- [x] `confirm` tier + marginal logprob → `.confirmBack`
+- [x] `confirm` tier + below `routeLow` → `.promptBack`
+- [x] `always_confirm` tier + high logprob → `.confirmBack` (always, per spec)
+- [x] `always_confirm` tier + low logprob → `.confirmBack` (still not prompt-back — the action was resolved)
+- [x] Injected thresholds are used (not hardcoded); changing them changes the gate outcome
+- [x] `just check` passes
 
 ---
 
