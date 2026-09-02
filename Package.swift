@@ -222,7 +222,7 @@ let package = Package(
         // `SystemSkillExecutor` so the App layer injects NSWorkspace / notifications.
         .target(
             name: "BuiltinSkills",
-            dependencies: ["CommandDispatcher", "SkillManifest"]
+            dependencies: ["AideCore", "CommandDispatcher", "SkillManifest"]
         ),
         // P4 Phase 7 · Command Mode driver + calibration JSONL logger. Depends on
         // seams (STTEngine, Routing, Dispatching) and Persistence.FileAppender —

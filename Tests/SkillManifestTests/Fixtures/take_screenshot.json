@@ -15,7 +15,7 @@
   },
   "permissions": { "network": false, "requires": ["screen_recording"] },
   "schedule": null,
-  "risk_tier": "low",
+  "risk_tier": "always_confirm",
   "enabled": true,
   "script_ref": null,
   "generated_by": "builtin"

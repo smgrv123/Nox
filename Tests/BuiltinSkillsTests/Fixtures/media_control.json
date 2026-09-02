@@ -15,7 +15,7 @@
   },
   "permissions": { "network": false, "requires": [] },
   "schedule": null,
-  "risk_tier": "low",
+  "risk_tier": "confirm",
   "enabled": true,
   "script_ref": null,
   "generated_by": "builtin"

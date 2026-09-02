@@ -191,7 +191,7 @@ final class ManifestTests: XCTestCase {
         let manifest = try decoder.decode(Manifest.self, from: data)
         XCTAssertEqual(manifest.id, "open_application")
         XCTAssertEqual(manifest.kind, .builtin)
-        XCTAssertEqual(manifest.riskTier, .low)
+        XCTAssertEqual(manifest.riskTier, .confirm)
         XCTAssertNil(manifest.scriptRef)
     }
 
