@@ -27,7 +27,7 @@ public final class CommandModeDriver: VoiceSessionDriver {
     private let dispatcher: any Dispatching
     private let registry: any SkillRegistering
     private let logger: CalibrationLogger
-    private let endpoint: LLMEndpoint
+    private let resolveEndpoint: @Sendable () async throws -> LLMEndpoint
 
     private var generation = 0
     private var activeMode: VoiceSessionMode = .command
@@ -48,7 +48,7 @@ public final class CommandModeDriver: VoiceSessionDriver {
         dispatcher: any Dispatching,
         registry: any SkillRegistering,
         logger: CalibrationLogger,
-        endpoint: LLMEndpoint
+        resolveEndpoint: @escaping @Sendable () async throws -> LLMEndpoint
     ) {
         self.engine = engine
         self.capture = capture
@@ -57,7 +57,30 @@ public final class CommandModeDriver: VoiceSessionDriver {
         self.dispatcher = dispatcher
         self.registry = registry
         self.logger = logger
-        self.endpoint = endpoint
+        self.resolveEndpoint = resolveEndpoint
+    }
+
+    /// Convenience for tests and other callers with a fixed endpoint.
+    public convenience init(
+        engine: any STTEngine,
+        capture: any AudioCaptureBuffer,
+        preGate: SegmentPreGate,
+        router: any Routing,
+        dispatcher: any Dispatching,
+        registry: any SkillRegistering,
+        logger: CalibrationLogger,
+        endpoint: LLMEndpoint
+    ) {
+        self.init(
+            engine: engine,
+            capture: capture,
+            preGate: preGate,
+            router: router,
+            dispatcher: dispatcher,
+            registry: registry,
+            logger: logger,
+            resolveEndpoint: { endpoint }
+        )
     }
 
     // MARK: - VoiceSessionDriver
@@ -149,6 +172,7 @@ public final class CommandModeDriver: VoiceSessionDriver {
         generation: Int
     ) async {
         do {
+            let endpoint = try await resolveEndpoint()
             let intent = try await router.route(
                 transcript: text,
                 whisperAvgLogprob: transcription.utteranceAvgLogprob,

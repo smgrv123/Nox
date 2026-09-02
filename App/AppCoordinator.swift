@@ -9,10 +9,7 @@ import Onboarding
 import Overlay
 import Permissions
 import Persistence
-import STTVoiceSession
-import SpeechToText
 import VoiceSession
-import WhisperSTTEngine
 import os
 
 /// Owns Aide's app lifecycle: single-instance enforcement at launch, the
@@ -64,17 +61,6 @@ final class AppCoordinator: ObservableObject {
     /// can drive it (see `MenubarMenu`).
     let overlay = OverlayController()
 
-    /// P2a Phase 3 (the seam paying off; User Stories 1, 6, 22): the **real** STT-backed
-    /// `AideCore.VoiceSessionDriver`, swapped in for `MockVoiceSessionDriver` with no change
-    /// to `VoiceSessionCoordinator`/Overlay. Constructing it opens nothing (mic opens only
-    /// on a hold; model loads lazily; an absent model fails safe, not a crash). `lazy`, not
-    /// `let` (Phase 5): the model path depends on `settings.modelTier`, not loaded yet at
-    /// construction time — only once `setUpStorage()` runs. Mirrors `voiceSession` below.
-    private lazy var voiceDriver = STTVoiceSessionDriver(
-        engine: WhisperSTTEngine(modelURL: AppCoordinator.modelsDirectory.blobURL(for: resolvedSttModelDescriptor)),
-        capture: AudioCapture(),
-        preGate: SegmentPreGate(thresholds: .provisional))
-
     /// Progress/failure/ready state of the onboarding-triggered Whisper (`stt`) and
     /// Qwen (`llm`) downloads (Phase 5); `nil` until `confirmModelTier(_:)` starts each.
     @Published var sttModelProvisioningState: ModelProvisioner.State?
@@ -95,25 +81,13 @@ final class AppCoordinator: ObservableObject {
     /// after an idle-unload (Phase 6; LLD §5.4).
     var productionSidecarModel: ModelDescriptor?
 
-    /// Orchestrates hotkey → Overlay → `voiceDriver` → Overlay (docs/04-hld.md §13,
-    /// docs/05-lld.md §10). `lazy` because its `emit` sink is `overlay.send` and its
-    /// `playCue`/`presentText` sinks close over `self` — all only valid once this
-    /// instance is fully initialized; first access is from `startHotkeys()`.
-    private lazy var voiceSession = VoiceSessionCoordinator(
-        driver: voiceDriver,
-        emit: overlay.send,
-        playCue: { [weak self] in self?.playListenCue() },
-        scheduleAutoHide: { work in
-            DispatchQueue.main.asyncAfter(deadline: .now() + AppCoordinator.resultDisplayDuration, execute: work)
-        },
-        presentText: { [weak self] transcript, result in
-            self?.overlay.present(transcript: transcript, result: result?.summary)
-        },
-        playProcessingCue: { [weak self] in self?.playProcessingCue() },
-        reportStatus: { [weak self] phase in self?.reflectVoiceSessionPhase(phase) })
+    /// Orchestrates hotkey → Overlay → mux driver → Overlay. Assigned by
+    /// `setUpCommandMode()` before `startHotkeys()` so the coordinator is constructed
+    /// with the command/dictation mux (VoiceSessionCoordinator itself is unchanged).
+    var voiceSession: VoiceSessionCoordinator?
 
     /// How long `.showingResult` stays on screen before Phase 6's loop auto-hides it.
-    private static let resultDisplayDuration: TimeInterval = 2.5
+    static let resultDisplayDuration: TimeInterval = 2.5
 
     private let logger = Logger(subsystem: Build.bundleIdentifier, category: "Lifecycle")
 
@@ -184,8 +158,11 @@ final class AppCoordinator: ObservableObject {
     func applicationDidFinishLaunching() {
         guard !isDuplicateInstance else { return }
         setUpStorage()
-        startHotkeys()
         installSleepWakeObserver()
+        Task { @MainActor in
+            await self.setUpCommandMode()
+            self.startHotkeys()
+        }
     }
 
     /// Install the global push-to-talk tap and route its two callbacks to the menubar
@@ -202,7 +179,7 @@ final class AppCoordinator: ObservableObject {
                 self?.reflectHold(activation)
                 // PHASE 6: alongside the menubar mirror above, drive the marquee
                 // hotkey → Overlay → mock-driver loop (User Stories 2, 39, 40, 41).
-                self?.voiceSession.handle(activation)
+                self?.voiceSession?.handle(activation)
             }
         }
         // P7: surface (or clear) the Input Monitoring fix-it as the tap install
@@ -244,7 +221,7 @@ final class AppCoordinator: ObservableObject {
     /// Processing/ShowingResult even though the Overlay had moved on). Wired as
     /// `voiceSession`'s `reportStatus` sink; `.listening` is never reported there —
     /// `reflectHold` above already owns that text.
-    private func reflectVoiceSessionPhase(_ phase: VoiceSessionPhase) {
+    func reflectVoiceSessionPhase(_ phase: VoiceSessionPhase) {
         switch phase {
         case .processing:
             statusText = "⏳ Processing…"
@@ -260,7 +237,7 @@ final class AppCoordinator: ObservableObject {
     /// every accepted listen-start (fresh or PTT-restart) via the injected `playCue`
     /// sink — the gate lives here because `VoiceSession` has no visibility into
     /// `Configuration`'s `Settings`.
-    private func playListenCue() {
+    func playListenCue() {
         guard settings.indicators.audioCueOnListen else { return }
         NSSound(named: "Tink")?.play()
     }
@@ -270,7 +247,7 @@ final class AppCoordinator: ObservableObject {
     /// `VoiceSessionCoordinator` calls this on every accepted "PTT up" (processing
     /// begin) via the injected `playProcessingCue` sink, fixing the toggle that used
     /// to persist a preference nothing read.
-    private func playProcessingCue() {
+    func playProcessingCue() {
         guard settings.indicators.audioCueOnProcessing else { return }
         NSSound(named: "Tink")?.play()
     }

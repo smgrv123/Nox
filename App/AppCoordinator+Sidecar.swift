@@ -228,9 +228,9 @@ private func resolveSidecarCheckConfig(
 /// Poll `manager.state` (no real sleep budget wasted — `SidecarLifecycleController`
 /// already logs every transition via `onStateChange`, this just waits for the terminal
 /// one that matters here) until `.ready` yields a usable endpoint, `.failed` gives up, or
-/// `timeout` elapses. A file-private free function — kept out of `AppCoordinator`'s
-/// extension to stay within SwiftLint's function-body-length ceiling.
-private func waitForSidecarReady(
+/// `timeout` elapses. An internal (module-wide) free function — kept out of
+/// `AppCoordinator`'s extension to stay within SwiftLint's function-body-length ceiling.
+func waitForSidecarReady(
     _ manager: SidecarManager,
     appLog: AppLog?,
     timeout: TimeInterval = 60

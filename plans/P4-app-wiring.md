@@ -107,15 +107,15 @@ Three pieces:
 
 ### Acceptance criteria
 
-- [ ] All 6 P4 products listed in `project.yml`; `just gen` succeeds
-- [ ] `MuxVoiceSessionDriver` routes `.command` to `CommandModeDriver`
-- [ ] `MuxVoiceSessionDriver` routes `.dictation` to `STTVoiceSessionDriver`
-- [ ] `VoiceSessionCoordinator` init and code are unchanged
-- [ ] Command hotkey → "what time is it" → current time shown in Overlay
-- [ ] Command hotkey → "calculate 5 plus 3" → "8" shown in Overlay
-- [ ] Dictation hotkey → unchanged behavior (no regression)
-- [ ] `just check` green
-- [ ] `just app` builds the .app successfully
+- [x] All 6 P4 products listed in `project.yml`; `just gen` succeeds
+- [x] `MuxVoiceSessionDriver` routes `.command` to `CommandModeDriver`
+- [x] `MuxVoiceSessionDriver` routes `.dictation` to `STTVoiceSessionDriver`
+- [x] `VoiceSessionCoordinator` init and code are unchanged
+- [x] Command hotkey → "what time is it" → current time shown in Overlay
+- [x] Command hotkey → "calculate 5 plus 3" → "8" shown in Overlay
+- [x] Dictation hotkey → unchanged behavior (no regression)
+- [x] `just check` green
+- [x] `just app` builds the .app successfully
 
 ---
 
