@@ -1,22 +1,24 @@
-import Foundation
-
-/// Outcome of scanning a single command or script.
+/// Outcome of scanning a single command or script (LLD §3.6, §4.3 Phase D).
 ///
-/// Two-tier model from docs/05-lld.md §11 / PRD §7.3:
-/// - `.allow`      — nothing matched; safe to run/insert.
-/// - `.confirm`    — a dangerous pattern matched that the user may override via a
-///                   distinct, destructive-styled confirmation (Layer 2).
-/// - `.hardBlock`  — privilege escalation (`sudo`, `su`, …). No override path in v1.
+/// Three-tier model: `.clean` (safe), `.confirm` (dangerous but overridable via
+/// a distinct destructive-styled confirmation), `.hardBlock` (privilege escalation
+/// or Aide-generated automation — no override path in v1).
 public enum ScanVerdict: Equatable, Sendable {
-    case allow
-    case confirm(reason: String, matched: String)
-    case hardBlock(reason: String, matched: String)
+    case clean
+    case confirm(findings: [Finding])
+    case hardBlock(findings: [Finding])
 
-    /// Convenience for tests / call sites that only care about the tier.
     public var isBlocked: Bool {
         switch self {
-        case .allow: return false
+        case .clean: return false
         case .confirm, .hardBlock: return true
+        }
+    }
+
+    public var findings: [Finding] {
+        switch self {
+        case .clean: return []
+        case .confirm(let findings), .hardBlock(let findings): return findings
         }
     }
 }

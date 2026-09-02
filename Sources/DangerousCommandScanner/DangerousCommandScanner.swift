@@ -5,131 +5,145 @@ import Foundation
 /// This is a Swift, in-process scanner that treats input as **data** and never
 /// executes it — it cannot be prompt-injected (PRD §7.3, docs/05-lld.md §4.3/§11).
 ///
-/// Scope of THIS file: a faithful first-pass classifier covering the highest-value
-/// blocklist entries. It normalises whitespace and inspects the raw string plus its
-/// pipe/`;`/`&&` segments.
-///
-/// TODO (docs/05-lld.md §4.3): full lexical tokenisation with **recursive descent**
-/// into `$(...)`, backticks, and `sh -c "…"` / `bash -c "…"` so nested cases such as
-/// `bash -c "rm -rf *"` are decomposed and each layer scanned. The default posture is
-/// strict: false positives (over-confirming) are acceptable; false negatives are not.
+/// **Current implementation:** regex-based first-pass classifier covering the
+/// highest-value blocklist entries. The structured rule engine (LLD §4.3 Phase C)
+/// replaces these regexes in Phase 3; this bridge wraps regex matches into `Finding`
+/// objects under the new `ScanVerdict` shape.
 public struct DangerousCommandScanner: Sendable {
 
     public init() {}
 
-    /// A single blocklist rule.
     private struct Rule {
         let regex: NSRegularExpression
         let reason: String
         let hard: Bool
+        let ruleID: RuleID
     }
 
-    /// Ordered rules. Hard-block rules are checked first so privilege escalation
-    /// always wins over a co-occurring confirm-tier match.
     private static let rules: [Rule] = {
         func rx(_ pattern: String) -> NSRegularExpression {
-            // Patterns are authored case-insensitively; `\b` word boundaries keep
-            // us from matching inside larger identifiers (e.g. "pseudocode").
-            // The pattern is a compile-time constant literal, so this never throws.
             // swiftlint:disable:next force_try
             try! NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
         }
         return [
-            // ---- HARD BLOCK: privilege escalation (no override path, PRD §7.3) ----
             Rule(
                 regex: rx(#"(^|[\s;&|(])sudo\b"#),
                 reason: "Runs a command as root. Privilege escalation is never permitted.",
-                hard: true),
+                hard: true,
+                ruleID: .privilegeEscalation),
             Rule(
                 regex: rx(#"(^|[\s;&|(])su\b"#),
                 reason: "Switches to another (super)user. Privilege escalation is never permitted.",
-                hard: true),
+                hard: true,
+                ruleID: .privilegeEscalation),
             Rule(
                 regex: rx(#"(^|[\s;&|(])doas\b"#),
                 reason: "Privilege escalation via doas is never permitted.",
-                hard: true),
-
-            // ---- CONFIRM: destructive / dangerous (override via Layer 2) ----
-            // NOTE: recursive `rm` is handled by `recursiveRmMatch(in:)` below, not
-            // a regex, so separated flags (`rm -r -f`) can't slip past a single pattern.
+                hard: true,
+                ruleID: .privilegeEscalation),
             Rule(
                 regex: rx(#"\b(srm|shred)\b"#),
                 reason: "Securely erases files. This is irreversible.",
-                hard: false),
+                hard: false,
+                ruleID: .secureErase),
             Rule(
                 regex: rx(#"\b(curl|wget)\b[^|]*\|\s*(sudo\s+)?(sh|bash|zsh)\b"#),
                 reason: "Pipes a downloaded script straight into a shell (remote code execution).",
-                hard: false),
+                hard: false,
+                ruleID: .pipedRemoteExecution),
             Rule(
                 regex: rx(#"\bdd\b[^\n]*\bof=/dev/"#),
                 reason: "Writes raw bytes directly to a device. Can destroy a disk.",
-                hard: false),
+                hard: true,
+                ruleID: .diskDestruction),
             Rule(
                 regex: rx(#"\bmkfs(\.\w+)?\b"#),
                 reason: "Formats a filesystem. Destroys all data on the target.",
-                hard: false),
+                hard: true,
+                ruleID: .diskDestruction),
             Rule(
                 regex: rx(#"\bdiskutil\s+(erase|reformat|partitionDisk)\w*"#),
                 reason: "Erases or reformats a disk. Destroys all data on the target.",
-                hard: false),
+                hard: true,
+                ruleID: .diskDestruction),
             Rule(
                 regex: rx(#"\bchmod\s+-R\s+0*777\b"#),
                 reason: "Recursively makes files world-writable. A security risk.",
-                hard: false),
+                hard: false,
+                ruleID: .broadPermissionChange),
             Rule(
                 regex: rx(#"\bkill\s+-9\s+-1\b"#),
                 reason: "Sends SIGKILL to every process the user owns.",
-                hard: false),
+                hard: false,
+                ruleID: .broadKill),
             Rule(
                 regex: rx(#":\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:"#),
                 reason: "Fork bomb — spawns processes until the machine is unusable.",
-                hard: false),
+                hard: true,
+                ruleID: .forkBomb),
             Rule(
                 regex: rx(#"\bcrontab\s+-r\b"#),
                 reason: "Deletes all of the user's cron jobs.",
-                hard: false),
+                hard: false,
+                ruleID: .shellProfileEdit),
             Rule(
                 regex: rx(#"\b(base64\s+(-D|--decode|-d)[^\n]*\|\s*(sh|bash|zsh)|eval\b)"#),
                 reason:
                     "Decodes-then-executes or evaluates a constructed string — a common obfuscation.",
-                hard: false),
+                hard: false,
+                ruleID: .obfuscatedExecution),
         ]
     }()
 
-    /// Scan a command / script and return the strictest matching verdict.
+    /// Scan a shell command string for dangerous patterns.
     ///
-    /// - Parameter command: the raw command or full script text.
-    /// - Returns: `.hardBlock` if any privilege-escalation rule matches, else the
-    ///   first `.confirm` match, else `.allow`.
-    public func scan(_ command: String) -> ScanVerdict {
+    /// - Parameter context: Phase 1 bridge — accepted but not yet consumed.
+    ///   Context-dependent behavior (H7 escalation for Aide-generated automations,
+    ///   C11 terminal-dictation detection) arrives with the structured rule engine
+    ///   in Phase 3.
+    public func scan(_ command: String, context: ScanContext = .init()) -> ScanVerdict {
         let normalized = normalize(command)
         let full = NSRange(normalized.startIndex..., in: normalized)
 
-        // Hard-block rules take precedence over confirm rules.
+        // Hard-block rules are checked first so privilege escalation / disk destruction
+        // always wins over a co-occurring confirm match.
         for rule in Self.rules where rule.hard {
             if let match = rule.regex.firstMatch(in: normalized, range: full) {
-                return .hardBlock(reason: rule.reason, matched: matchedText(match, in: normalized))
+                return .hardBlock(findings: [makeFinding(rule, match, normalized, .hardBlock)])
             }
         }
 
-        // Recursive `rm` is checked with a flag-aware scan (not a single regex) so
-        // that separated flags — `rm -r -f`, `rm --recursive` — cannot slip past.
+        // Flag-aware scanning (not regex) so separated flags like `rm -r -f` can't
+        // slip past a naive single-token pattern.
         if let matched = recursiveRmMatch(in: normalized) {
-            return .confirm(
-                reason: "Recursively deletes files. This is irreversible.", matched: matched)
+            let finding = Finding(
+                rule: .recursiveDelete,
+                severity: .confirm,
+                matchedText: matched,
+                explanation: "Recursively deletes files. This is irreversible."
+            )
+            return .confirm(findings: [finding])
         }
 
         for rule in Self.rules where !rule.hard {
             if let match = rule.regex.firstMatch(in: normalized, range: full) {
-                return .confirm(reason: rule.reason, matched: matchedText(match, in: normalized))
+                return .confirm(findings: [makeFinding(rule, match, normalized, .confirm)])
             }
         }
-        return .allow
+        return .clean
     }
 
-    /// Detect a recursive `rm` in any pipeline segment, regardless of how the
-    /// recursive flag is spelled: `-rf`, `-r -f`, `-fr`, `-R`, `--recursive`.
-    /// Recursive delete is flagged even without `-f` — it is already irreversible.
+    private func makeFinding(
+        _ rule: Rule, _ match: NSTextCheckingResult, _ text: String, _ severity: Severity
+    ) -> Finding {
+        Finding(
+            rule: rule.ruleID,
+            severity: severity,
+            matchedText: matchedText(match, in: text),
+            explanation: rule.reason
+        )
+    }
+
     private func recursiveRmMatch(in normalized: String) -> String? {
         let separators: Set<Character> = [";", "&", "|", "\n"]
         for segment in normalized.split(whereSeparator: { separators.contains($0) }) {
@@ -139,7 +153,6 @@ public struct DangerousCommandScanner: Sendable {
             let args = tokens[tokens.index(after: cmdIdx)...]
             let isRecursive = args.contains { token in
                 if token == "--recursive" { return true }
-                // A short-flag cluster like "-rf" / "-R" — but not a long flag ("--force").
                 guard token.hasPrefix("-"), !token.hasPrefix("--") else { return false }
                 return token.dropFirst().contains { $0 == "r" || $0 == "R" }
             }
@@ -152,8 +165,8 @@ public struct DangerousCommandScanner: Sendable {
 
     // MARK: - Helpers
 
-    /// Collapse runs of whitespace so patterns like `rm   -rf` still match, while
-    /// preserving segment separators. (A full tokeniser is the LLD §4.3 upgrade.)
+    // Collapse whitespace so patterns like `rm   -rf` still match the regex rules,
+    // while preserving segment separators (newlines) for per-command splitting.
     private func normalize(_ input: String) -> String {
         input
             .replacingOccurrences(of: "\t", with: " ")
