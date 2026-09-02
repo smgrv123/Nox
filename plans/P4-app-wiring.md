@@ -280,15 +280,15 @@ assertions.
 
 ### Acceptance criteria
 
-- [ ] `FileSkillRegistry` loads valid manifests from a directory
-- [ ] Invalid manifests are skipped (no crash)
-- [ ] Built-in manifests win on ID conflict with disk manifests
-- [ ] File add → skill appears in registry's grammar and catalog
-- [ ] File remove → skill removed from grammar and catalog
-- [ ] `AppCoordinator` uses `FileSkillRegistry` instead of `InMemorySkillRegistry`
-- [ ] `HistoryWipe` with `includeCalibrationLog: true` deletes `logs/calibration.jsonl`
-- [ ] `HistoryWipe` with `includeCalibrationLog: false` spares it
-- [ ] `just check` green
+- [x] `FileSkillRegistry` loads valid manifests from a directory
+- [x] Invalid manifests are skipped (no crash)
+- [x] Built-in manifests win on ID conflict with disk manifests
+- [x] File add → skill appears in registry's grammar and catalog
+- [x] File remove → skill removed from grammar and catalog
+- [x] `AppCoordinator` uses `FileSkillRegistry` instead of `InMemorySkillRegistry`
+- [x] `HistoryWipe` with `includeCalibrationLog: true` deletes `logs/calibration.jsonl`
+- [x] `HistoryWipe` with `includeCalibrationLog: false` spares it
+- [x] `just check` green
 
 ---
 

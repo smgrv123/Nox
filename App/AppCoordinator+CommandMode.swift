@@ -51,7 +51,18 @@ extension AppCoordinator {
         capture: any AudioCaptureBuffer,
         preGate: SegmentPreGate
     ) async -> CommandModeDriver {
-        let registry = InMemorySkillRegistry(manifests: BuiltinManifestCatalog.all)
+        let registryDirectory: URL
+        if let storage {
+            registryDirectory = storage.registryDirectory
+        } else {
+            registryDirectory = FileManager.default.temporaryDirectory.appending(
+                path: "aide-registry-\(UUID().uuidString)")
+            try? FileManager.default.createDirectory(
+                at: registryDirectory, withIntermediateDirectories: true)
+        }
+        let registry = FileSkillRegistry(
+            registryDirectory: registryDirectory,
+            builtins: BuiltinManifestCatalog.all)
         let grammar = await registry.routerGrammar()
         let catalog = await registry.routerPromptSkillCatalog()
         let router = LocalCommandRouter(
