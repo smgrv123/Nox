@@ -50,6 +50,10 @@ let package = Package(
         // P4 Phase 1 · Skill/Automation Manifest model: the `Manifest` struct, `JSONValue`
         // recursive enum, supporting types, and `ManifestValidation` (docs/05-lld.md §2.1).
         .library(name: "SkillManifest", targets: ["SkillManifest"]),
+        // P4 Phase 2 · Skill Registry: GBNF grammar + prompt catalog from manifests.
+        .library(name: "SkillRegistry", targets: ["SkillRegistry"]),
+        // P4 Phase 3 · Router Contract v2 parse + logprob-derived routing confidence.
+        .library(name: "CommandRouter", targets: ["CommandRouter"]),
     ],
     targets: [
         .target(name: "AideCore"),
@@ -182,6 +186,18 @@ let package = Package(
             name: "SkillManifest",
             dependencies: ["AideCore"]
         ),
+        // P4 Phase 2 · loads/validates manifests, generates GBNF + router prompt catalog,
+        // validates Router-emitted parameters (docs/05-lld.md §3.1, §4.4).
+        .target(
+            name: "SkillRegistry",
+            dependencies: ["SkillManifest"]
+        ),
+        // P4 Phase 3 · Contract v2 parse + RoutingConfidence from TokenLogprob
+        // (docs/05-lld.md §2.2, §4.2). Depends on LLMRuntime protocols, never InferenceClient.
+        .target(
+            name: "CommandRouter",
+            dependencies: ["SkillManifest", "LLMRuntime"]
+        ),
         // P2b Phase 4 · the pure LLM-runtime heart, playing the role `SpeechToText`
         // played for P2a: `LlmTierPolicy` (Tier → Qwen `ModelDescriptor`) today; the
         // `LLMClient`/`SidecarController` seams, backoff schedule, and idle-unload state
@@ -296,6 +312,14 @@ let package = Package(
             name: "SkillManifestTests",
             dependencies: ["SkillManifest", "AideCore"],
             resources: [.copy("Fixtures")]
+        ),
+        .testTarget(
+            name: "SkillRegistryTests",
+            dependencies: ["SkillRegistry", "SkillManifest", "AideCore"]
+        ),
+        .testTarget(
+            name: "CommandRouterTests",
+            dependencies: ["CommandRouter", "SkillManifest", "LLMRuntime"]
         ),
     ]
 )

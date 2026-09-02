@@ -65,16 +65,16 @@ The `SkillRegistry` module: an actor that loads manifest files, validates them, 
 
 ### Acceptance criteria
 
-- [ ] `InMemorySkillRegistry` filters out manifests that fail validation; retains valid ones
-- [ ] `routerGrammar()` for a known 3-skill set produces the expected GBNF text (discriminated union with `intent` first, each skill alternative, `null` alternative)
-- [ ] The grammar includes `general_qa` and `screen_qa` as reserved alternatives
-- [ ] `routerPromptSkillCatalog()` includes each enabled skill's description and parameter schema
-- [ ] `validate(parameters:for:)` passes for correctly-typed parameters
-- [ ] `validate(parameters:for:)` rejects missing required fields
-- [ ] `validate(parameters:for:)` rejects wrong-type parameter values
-- [ ] `validate(parameters:for:)` rejects additional properties when `additionalProperties: false`
-- [ ] Grammar output is deterministic (same input → same output) and stably ordered by `id`
-- [ ] Module registered in `Package.swift`; `just check` passes
+- [x] `InMemorySkillRegistry` filters out manifests that fail validation; retains valid ones
+- [x] `routerGrammar()` for a known 3-skill set produces the expected GBNF text (discriminated union with `intent` first, each skill alternative, `null` alternative)
+- [x] The grammar includes `general_qa` and `screen_qa` as reserved alternatives
+- [x] `routerPromptSkillCatalog()` includes each enabled skill's description and parameter schema
+- [x] `validate(parameters:for:)` passes for correctly-typed parameters
+- [x] `validate(parameters:for:)` rejects missing required fields
+- [x] `validate(parameters:for:)` rejects wrong-type parameter values
+- [x] `validate(parameters:for:)` rejects additional properties when `additionalProperties: false`
+- [x] Grammar output is deterministic (same input → same output) and stably ordered by `id`
+- [x] Module registered in `Package.swift`; `just check` passes
 
 ---
 
@@ -97,16 +97,16 @@ The `CommandRouter` module: parses the GBNF-constrained JSON from `RouterComplet
 
 ### Acceptance criteria
 
-- [ ] `RouterContractParser` parses valid Contract v2 JSON into `RouterDecision` with correct `intent`, `skillID`, `parameters`
-- [ ] `RouterContractParser` parses `"skill_id": null` into `skillID = nil`
-- [ ] `RouterContractParser` returns an error for malformed/non-JSON input
-- [ ] `RoutingConfidenceDeriver` correctly locates the `skill_id` byte range in the raw JSON
-- [ ] `RoutingConfidenceDeriver` collects overlapping `TokenLogprob`s and computes sum + mean
-- [ ] `RoutingConfidenceDeriver` handles multi-token skill IDs (e.g. `"open_application"` tokenized as multiple tokens)
-- [ ] `RoutingConfidenceDeriver` handles `skill_id: null` (the `null` literal tokens)
-- [ ] `RoutingThresholds.provisional` matches the LLD §4.2 values
-- [ ] `Routing` protocol conformer (with `MockLLMClient`) returns the expected `RoutedIntent` for a canned completion
-- [ ] Module registered in `Package.swift`; `just check` passes
+- [x] `RouterContractParser` parses valid Contract v2 JSON into `RouterDecision` with correct `intent`, `skillID`, `parameters`
+- [x] `RouterContractParser` parses `"skill_id": null` into `skillID = nil`
+- [x] `RouterContractParser` returns an error for malformed/non-JSON input
+- [x] `RoutingConfidenceDeriver` correctly locates the `skill_id` byte range in the raw JSON
+- [x] `RoutingConfidenceDeriver` collects overlapping `TokenLogprob`s and computes sum + mean
+- [x] `RoutingConfidenceDeriver` handles multi-token skill IDs (e.g. `"open_application"` tokenized as multiple tokens)
+- [x] `RoutingConfidenceDeriver` handles `skill_id: null` (the `null` literal tokens)
+- [x] `RoutingThresholds.provisional` matches the LLD §4.2 values
+- [x] `Routing` protocol conformer (with `MockLLMClient`) returns the expected `RoutedIntent` for a canned completion
+- [x] Module registered in `Package.swift`; `just check` passes
 
 ---
 
