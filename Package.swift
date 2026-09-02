@@ -59,6 +59,9 @@ let package = Package(
         // P4 Phase 6 · Built-in skill implementations. Pure skills are value-in →
         // value-out; effectful skills call an injected `SystemSkillExecutor`.
         .library(name: "BuiltinSkills", targets: ["BuiltinSkills"]),
+        // P4 Phase 7 · Command Mode pipeline: VoiceSessionDriver that routes →
+        // dispatches, plus the day-one CalibrationLogger JSONL harness (LLD §4.2).
+        .library(name: "CommandMode", targets: ["CommandMode"]),
     ],
     targets: [
         .target(name: "AideCore"),
@@ -221,6 +224,22 @@ let package = Package(
             name: "BuiltinSkills",
             dependencies: ["CommandDispatcher", "SkillManifest"]
         ),
+        // P4 Phase 7 · Command Mode driver + calibration JSONL logger. Depends on
+        // seams (STTEngine, Routing, Dispatching) and Persistence.FileAppender —
+        // never InferenceClient, WhisperSTTEngine, or AppKit.
+        .target(
+            name: "CommandMode",
+            dependencies: [
+                "AideCore",
+                "CommandDispatcher",
+                "CommandRouter",
+                "LLMRuntime",
+                "Persistence",
+                "SkillManifest",
+                "SkillRegistry",
+                "SpeechToText",
+            ]
+        ),
         // P2b Phase 4 · the pure LLM-runtime heart, playing the role `SpeechToText`
         // played for P2a: `LlmTierPolicy` (Tier → Qwen `ModelDescriptor`) today; the
         // `LLMClient`/`SidecarController` seams, backoff schedule, and idle-unload state
@@ -364,6 +383,21 @@ let package = Package(
                 "AideCore",
             ],
             resources: [.copy("Fixtures")]
+        ),
+        .testTarget(
+            name: "CommandModeTests",
+            dependencies: [
+                "CommandMode",
+                "AideCore",
+                "CommandDispatcher",
+                "CommandRouter",
+                "DangerousCommandScanner",
+                "LLMRuntime",
+                "Persistence",
+                "SkillManifest",
+                "SkillRegistry",
+                "SpeechToText",
+            ]
         ),
     ]
 )

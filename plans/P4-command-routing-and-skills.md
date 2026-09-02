@@ -233,14 +233,14 @@ Wire the full Command Mode pipeline end-to-end and add the day-one calibration h
 
 ### Acceptance criteria
 
-- [ ] `CommandModeDriver` with `MockLLMClient` + `MockSTTEngine` + mock scanner + mock skills: transcript "open Safari" → routes to `open_application` → executes → delivers `.result` with success summary
-- [ ] `CommandModeDriver`: transcript that routes to `null` → delivers `.result` with prompt-back summary
-- [ ] `CommandModeDriver`: transcript that routes to a `confirm`-tier skill with marginal confidence → delivers `.result` with confirm-back summary
-- [ ] `CommandModeDriver`: scanner Hard-Block → delivers `.result` with blocked summary
-- [ ] `CalibrationRecord` encodes to the expected JSONL shape
-- [ ] `CalibrationLogger` appends records to the file (tested with injected temp path)
-- [ ] `CalibrationLogger` records include `whisper_avg_logprob`, `routing_logprob_mean`, `chosen_skill_id`, `risk_tier`, `scanner_verdict`, `action_taken`
-- [ ] Existing `VoiceSessionCoordinator` tests still pass (the seam contract is unchanged)
-- [ ] Existing `STTVoiceSessionDriver` tests still pass (dictation mode path unchanged)
-- [ ] Module registered in `Package.swift`; `just check` passes
-- [ ] `docs/07-implementation-pillars.md` updated to show P4 status
+- [x] `CommandModeDriver` with `MockLLMClient` + `MockSTTEngine` + mock scanner + mock skills: transcript "open Safari" → routes to `open_application` → executes → delivers `.result` with success summary
+- [x] `CommandModeDriver`: transcript that routes to `null` → delivers `.result` with prompt-back summary
+- [x] `CommandModeDriver`: transcript that routes to a `confirm`-tier skill with marginal confidence → delivers `.result` with confirm-back summary
+- [x] `CommandModeDriver`: scanner Hard-Block → delivers `.result` with blocked summary
+- [x] `CalibrationRecord` encodes to the expected JSONL shape
+- [x] `CalibrationLogger` appends records to the file (tested with injected temp path)
+- [x] `CalibrationLogger` records include `whisper_avg_logprob`, `routing_logprob_mean`, `chosen_skill_id`, `risk_tier`, `scanner_verdict`, `action_taken`
+- [x] Existing `VoiceSessionCoordinator` tests still pass (the seam contract is unchanged)
+- [x] Existing `STTVoiceSessionDriver` tests still pass (dictation mode path unchanged)
+- [x] Module registered in `Package.swift`; `just check` passes
+- [x] `docs/07-implementation-pillars.md` updated to show P4 status
