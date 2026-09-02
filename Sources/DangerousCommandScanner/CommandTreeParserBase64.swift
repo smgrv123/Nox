@@ -1,8 +1,9 @@
 import Foundation
 
-/// Detects `base64 --decode | sh` obfuscation patterns across pipe-connected
-/// segments. Produces a `.obfuscatedExecution` finding when matched; attempts
-/// one static-literal decode pass when the encoded payload is visible.
+/// Detects obfuscation-to-shell patterns across pipe-connected segments:
+/// `base64 -d | sh`, `openssl enc -d | sh`, `xxd -r | sh`, `printf … | sh`.
+/// Produces `.obfuscatedExecution` findings; attempts one static-literal decode
+/// pass for base64 when the encoded payload is visible.
 extension CommandTreeParser {
 
     private static let shellNames: Set<String> = ["sh", "bash", "zsh"]
@@ -17,35 +18,69 @@ extension CommandTreeParser {
             guard segments[idx + 1].precedingOperator == .pipe else { continue }
             let leftArgv = extractArgv(from: segments[idx].tokens)
             let rightArgv = extractArgv(from: segments[idx + 1].tokens)
-            guard isBase64Decode(leftArgv), isShell(rightArgv) else { continue }
+            guard isShell(rightArgv) else { continue }
 
-            let shellName = rightArgv[0]
-            findings.append(
-                Finding(
-                    rule: .obfuscatedExecution,
-                    severity: .confirm,
-                    matchedText: "base64 decode | \(shellName)",
-                    explanation:
-                        "Decodes data then pipes into a shell — a common obfuscation technique.",
-                    path: ["pipe"]
-                ))
+            if let label = obfuscationLabel(leftArgv) {
+                let shellName = rightArgv[0]
+                findings.append(
+                    Finding(
+                        rule: .obfuscatedExecution,
+                        severity: .confirm,
+                        matchedText: "\(label) | \(shellName)",
+                        explanation:
+                            "Decodes/generates data then pipes into a shell — obfuscation technique.",
+                        path: ["pipe"]
+                    ))
 
-            tryStaticDecode(
-                segments: segments, base64Idx: idx, findings: &findings)
+                if isBase64Decode(leftArgv) {
+                    tryStaticDecode(
+                        segments: segments, base64Idx: idx, findings: &findings)
+                }
+            }
         }
+    }
+
+    // MARK: - Obfuscation matchers
+
+    private static func obfuscationLabel(_ argv: [String]) -> String? {
+        if isBase64Decode(argv) { return "base64 decode" }
+        if isOpensslDecode(argv) { return "openssl decode" }
+        if isXxdReverse(argv) { return "xxd reverse" }
+        if isPrintfHex(argv) { return "printf hex" }
+        return nil
+    }
+
+    private static func isBase64Decode(_ argv: [String]) -> Bool {
+        guard argv.first == "base64" else { return false }
+        return argv.dropFirst().contains { decodeFlags.contains($0) }
+    }
+
+    private static func isOpensslDecode(_ argv: [String]) -> Bool {
+        guard argv.first == "openssl" else { return false }
+        let rest = Array(argv.dropFirst())
+        let hasEnc = rest.contains("enc")
+        let hasDec = rest.contains("-d") || rest.contains("--decrypt")
+        return hasEnc && hasDec
+    }
+
+    private static func isXxdReverse(_ argv: [String]) -> Bool {
+        guard argv.first == "xxd" else { return false }
+        return argv.dropFirst().contains("-r")
+    }
+
+    private static func isPrintfHex(_ argv: [String]) -> Bool {
+        guard argv.first == "printf" else { return false }
+        let args = argv.dropFirst().joined(separator: " ")
+        return args.contains("\\x")
     }
 
     // MARK: - Helpers
 
-    private static func extractArgv(from tokens: [ShellToken]) -> [String] {
+    static func extractArgv(from tokens: [ShellToken]) -> [String] {
         tokens.compactMap {
             if case .word(let text) = $0 { return text }
             return nil
         }
-    }
-
-    private static func isBase64Decode(_ argv: [String]) -> Bool {
-        argv.first == "base64" && argv.dropFirst().contains(where: { decodeFlags.contains($0) })
     }
 
     private static func isShell(_ argv: [String]) -> Bool {
