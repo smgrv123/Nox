@@ -72,6 +72,13 @@ public struct CommandDispatcher: Dispatching, Sendable {
         return await execute(skillID, parameters: intent.decision.parameters)
     }
 
+    public func dispatchApproved(_ intent: RoutedIntent) async -> DispatchOutcome {
+        guard let skillID = intent.decision.skillID else {
+            return Self.promptedBack
+        }
+        return await execute(skillID, parameters: intent.decision.parameters)
+    }
+
     private func scanIfExecutable(
         _ skillID: String,
         intent: RoutedIntent,

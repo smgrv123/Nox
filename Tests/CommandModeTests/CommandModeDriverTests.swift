@@ -55,10 +55,7 @@ final class CommandModeDriverTests: XCTestCase {
             updates,
             [
                 .transcript("open Safari"),
-                .result(
-                    VoiceSessionResult(
-                        transcript: "open Safari",
-                        summary: ConfidenceGate.promptBackSuggestion)),
+                .promptBack("open Safari", ConfidenceGate.promptBackSuggestion),
             ],
             "skill_id null is prompt-back, never guess-execute")
         XCTAssertEqual(executor.executeCallCount, 0)
@@ -79,10 +76,12 @@ final class CommandModeDriverTests: XCTestCase {
             updates,
             [
                 .transcript("open Safari"),
-                .result(
-                    VoiceSessionResult(
+                .confirmBack(
+                    ConfirmBackInfo(
                         transcript: "open Safari",
-                        summary: ConfidenceGate.confirmBackPrompt)),
+                        intent: "open Safari",
+                        skillID: "open_application",
+                        riskTier: .confirm)),
             ],
             "confirm-tier + marginal routing mean is Confirm-Back, not auto-execute")
         XCTAssertEqual(executor.executeCallCount, 0)
@@ -112,12 +111,60 @@ final class CommandModeDriverTests: XCTestCase {
             updates,
             [
                 .transcript("open Safari"),
-                .result(
-                    VoiceSessionResult(transcript: "open Safari", summary: "privilege escalation")),
+                .hardBlocked("open Safari", "privilege escalation"),
             ],
             "scanner Hard-Block surfaces the finding reason, never executes")
         XCTAssertEqual(executor.executeCallCount, 0)
         XCTAssertEqual(scanner.scanCallCount, 1)
+    }
+
+    func testApproveRedispatchesStashedIntent() async throws {
+        let executor = MockBuiltinSkillExecutor()
+        executor.result = .success(SkillResult(summary: "Opened Safari"))
+        let driver = try await makeDriver(
+            route: openSafariRoute(logprob: -0.40),
+            manifests: [openApplicationManifest(riskTier: .confirm)],
+            executor: executor
+        )
+
+        var updates: [VoiceSessionUpdate] = []
+        let confirmed = expectation(description: "confirm-back")
+        let executed = expectation(description: "executed after approve")
+        driver.onUpdate = { update in
+            updates.append(update)
+            if case .confirmBack = update { confirmed.fulfill() }
+            if case .result = update { executed.fulfill() }
+        }
+        driver.begin(mode: .command)
+        driver.end()
+        await fulfillment(of: [confirmed], timeout: 2)
+        XCTAssertEqual(executor.executeCallCount, 0)
+
+        driver.approve()
+        await fulfillment(of: [executed], timeout: 2)
+        XCTAssertEqual(executor.executeCallCount, 1)
+        XCTAssertEqual(
+            updates.last,
+            .result(VoiceSessionResult(transcript: "open Safari", summary: "Opened Safari")))
+    }
+
+    func testRejectDoesNotExecute() async throws {
+        let executor = MockBuiltinSkillExecutor()
+        executor.failIfCalled = true
+        let logURL = try temporaryLogURL()
+        let driver = try await makeDriver(
+            route: openSafariRoute(logprob: -0.40),
+            manifests: [openApplicationManifest(riskTier: .confirm)],
+            executor: executor,
+            logFileURL: logURL
+        )
+
+        _ = await collectResult(from: driver)
+        driver.reject()
+        let json = try await waitForLog(at: logURL)
+        XCTAssertEqual(executor.executeCallCount, 0)
+        XCTAssertEqual(json["user_outcome"] as? String, "rejected")
+        XCTAssertEqual(json["action_taken"] as? String, "confirm_back")
     }
 }
 
@@ -318,5 +365,53 @@ final class CommandModeDriverCalibrationTests: XCTestCase {
         let whisper = try XCTUnwrap(json["whisper_avg_logprob"] as? Double)
         XCTAssertEqual(whisper, -0.30, accuracy: 0.0001)
         XCTAssertEqual(executor.executeCallCount, 0)
+    }
+
+    func testPromptBackLogsDismissedUserOutcome() async throws {
+        let logURL = try temporaryLogURL()
+        let raw = #"{"intent":"nothing matches","skill_id":null,"parameters":{}}"#
+        let executor = MockBuiltinSkillExecutor()
+        executor.failIfCalled = true
+        let driver = try await makeDriver(
+            route: RouteStub(raw: raw, skillLiteral: "null", logprob: -0.08),
+            executor: executor,
+            logFileURL: logURL
+        )
+
+        _ = await collectResult(from: driver)
+        let json = try await waitForLog(at: logURL)
+        XCTAssertEqual(json["action_taken"] as? String, "prompted_back")
+        XCTAssertEqual(json["user_outcome"] as? String, "dismissed")
+    }
+
+    func testApproveLogsAcceptedUserOutcome() async throws {
+        let logURL = try temporaryLogURL()
+        let executor = MockBuiltinSkillExecutor()
+        executor.result = .success(SkillResult(summary: "Opened Safari"))
+        let driver = try await makeDriver(
+            route: openSafariRoute(logprob: -0.40),
+            manifests: [openApplicationManifest(riskTier: .confirm)],
+            executor: executor,
+            logFileURL: logURL
+        )
+
+        let confirmed = expectation(description: "confirm-back")
+        driver.onUpdate = { update in
+            if case .confirmBack = update { confirmed.fulfill() }
+        }
+        driver.begin(mode: .command)
+        driver.end()
+        await fulfillment(of: [confirmed], timeout: 2)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: logURL.path))
+
+        let executed = expectation(description: "executed")
+        driver.onUpdate = { update in
+            if case .result = update { executed.fulfill() }
+        }
+        driver.approve()
+        await fulfillment(of: [executed], timeout: 2)
+        let json = try await waitForLog(at: logURL)
+        XCTAssertEqual(json["user_outcome"] as? String, "accepted")
+        XCTAssertEqual(json["action_taken"] as? String, "executed")
     }
 }

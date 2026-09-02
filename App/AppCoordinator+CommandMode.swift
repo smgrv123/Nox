@@ -42,6 +42,8 @@ extension AppCoordinator {
             },
             playProcessingCue: { [weak self] in self?.playProcessingCue() },
             reportStatus: { [weak self] phase in self?.reflectVoiceSessionPhase(phase) })
+        overlay.onApprove = { [weak self] in self?.voiceSession?.approveConfirmBack() }
+        overlay.onReject = { [weak self] in self?.voiceSession?.rejectConfirmBack() }
     }
 
     private func makeCommandModeDriver(

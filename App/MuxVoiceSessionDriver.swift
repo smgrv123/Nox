@@ -3,9 +3,9 @@ import AideCore
 /// Thin `VoiceSessionDriver` that muxes Command Mode and Dictation onto one seam.
 ///
 /// `VoiceSessionCoordinator` stays unchanged: it sees one driver. `begin(mode:)`
-/// picks the active inner driver; `end()` / `cancel()` forward to it. `onUpdate`
-/// is copied onto both inners — only the active one fires (each has its own
-/// generation guard).
+/// picks the active inner driver; `end()` / `cancel()` / `approve()` / `reject()`
+/// forward to it. `onUpdate` is copied onto both inners — only the active one
+/// fires (each has its own generation guard).
 final class MuxVoiceSessionDriver: VoiceSessionDriver {
 
     var onUpdate: ((VoiceSessionUpdate) -> Void)? {
@@ -40,5 +40,13 @@ final class MuxVoiceSessionDriver: VoiceSessionDriver {
 
     func cancel() {
         active?.cancel()
+    }
+
+    func approve() {
+        active?.approve()
+    }
+
+    func reject() {
+        active?.reject()
     }
 }

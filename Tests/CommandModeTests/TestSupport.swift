@@ -284,6 +284,9 @@ extension XCTestCase {
         driver.onUpdate = { update in
             updates.append(update)
             if case .result = update { resolved.fulfill() }
+            if case .confirmBack = update { resolved.fulfill() }
+            if case .promptBack = update { resolved.fulfill() }
+            if case .hardBlocked = update { resolved.fulfill() }
         }
         driver.begin(mode: .command)
         driver.end()

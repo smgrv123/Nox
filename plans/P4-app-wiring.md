@@ -205,20 +205,20 @@ outcomes keep `userOutcome: null`.
 
 ### Acceptance criteria
 
-- [ ] `VoiceSessionUpdate` has `.confirmBack`, `.promptBack`, `.hardBlocked` cases
-- [ ] `VoiceSessionDriver` has `approve()` / `reject()` with default no-ops
-- [ ] `CommandModeDriver` emits structured outcomes (not collapsed strings)
-- [ ] Coordinator emits `.presentConfirmBack` / `.presentPromptBack` to Overlay
-- [ ] "take a screenshot" → confirm-back shown with Approve + Reject buttons
-- [ ] Approve → skill executes → result shown in Overlay
-- [ ] Reject → Overlay dismisses → command not run
-- [ ] Hard-blocked command → result-style warning, no approve option, auto-hides
-- [ ] Prompt-back → "Did you mean…?" shown → auto-hides after timeout
-- [ ] Calibration `user_outcome` populated: `accepted` / `rejected` / `dismissed`
-- [ ] `.executed` outcomes keep `userOutcome: null`
-- [ ] Existing `VoiceSessionCoordinatorTests` pass (no regression)
-- [ ] Existing `CommandModeDriverTests` updated for new update types
-- [ ] `just check` green
+- [x] `VoiceSessionUpdate` has `.confirmBack`, `.promptBack`, `.hardBlocked` cases
+- [x] `VoiceSessionDriver` has `approve()` / `reject()` with default no-ops
+- [x] `CommandModeDriver` emits structured outcomes (not collapsed strings)
+- [x] Coordinator emits `.presentConfirmBack` / `.presentPromptBack` to Overlay
+- [x] "take a screenshot" → confirm-back shown with Approve + Reject buttons
+- [x] Approve → skill executes → result shown in Overlay
+- [x] Reject → Overlay dismisses → command not run
+- [x] Hard-blocked command → result-style warning, no approve option, auto-hides
+- [x] Prompt-back → "Did you mean…?" shown → auto-hides after timeout
+- [x] Calibration `user_outcome` populated: `accepted` / `rejected` / `dismissed`
+- [x] `.executed` outcomes keep `userOutcome: null`
+- [x] Existing `VoiceSessionCoordinatorTests` pass (no regression)
+- [x] Existing `CommandModeDriverTests` updated for new update types
+- [x] `just check` green
 
 ---
 

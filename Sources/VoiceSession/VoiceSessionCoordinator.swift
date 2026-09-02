@@ -149,14 +149,54 @@ public final class VoiceSessionCoordinator {
             stash(transcript: text, result: result)
         case .result(let value):
             sessionInFlight = false
+            stash(transcript: transcript ?? value.transcript, result: value)
+            _ = emit(.presentResult)
+            reportStatus(.result(value))
+            scheduleDismissToIdle()
+        case .confirmBack(let info):
+            stash(
+                transcript: info.transcript,
+                result: VoiceSessionResult(transcript: info.transcript, summary: info.intent))
+            _ = emit(.presentConfirmBack)
+        case .promptBack(let transcript, let suggestion):
+            sessionInFlight = false
+            let summary = suggestion ?? "Did you mean…?"
+            stash(
+                transcript: transcript,
+                result: VoiceSessionResult(transcript: transcript, summary: summary))
+            guard emit(.presentPromptBack) else { return }
+            scheduleDismissToIdle()
+        case .hardBlocked(let transcript, let reason):
+            sessionInFlight = false
+            let value = VoiceSessionResult(transcript: transcript, summary: reason)
             stash(transcript: transcript, result: value)
             guard emit(.presentResult) else { return }
             reportStatus(.result(value))
-            scheduleAutoHide { [weak self] in
-                guard let self, self.emit(.dismiss) else { return }
-                self.reportStatus(.idle)
-            }
+            scheduleDismissToIdle()
         }
+    }
+
+    /// Auto-hide after a terminal Overlay presentation (result / prompt-back /
+    /// hard-blocked). Confirm-Back stays up until Approve or Reject.
+    private func scheduleDismissToIdle() {
+        scheduleAutoHide { [weak self] in
+            guard let self, self.emit(.dismiss) else { return }
+            self.reportStatus(.idle)
+        }
+    }
+
+    /// Overlay Approve — Confirm-Back → ShowingResult, then re-dispatch.
+    public func approveConfirmBack() {
+        guard emit(.approve) else { return }
+        driver.approve()
+    }
+
+    /// Overlay Reject — dismiss Confirm-Back without running the command.
+    public func rejectConfirmBack() {
+        _ = emit(.reject)
+        driver.reject()
+        sessionInFlight = false
+        reportStatus(.idle)
     }
 
     private func stash(transcript: String?, result: VoiceSessionResult?) {

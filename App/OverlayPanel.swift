@@ -34,6 +34,11 @@ final class OverlayController: ObservableObject {
     /// result.
     @Published private(set) var result: String?
 
+    /// Confirm-Back button actions. Wired by `AppCoordinator` to
+    /// `voiceSession.approveConfirmBack()` / `rejectConfirmBack()`.
+    var onApprove: (() -> Void)?
+    var onReject: (() -> Void)?
+
     /// Whether to render the Local/Cloud indicator badge (Phase 9; User Stories 29,
     /// 30). Mirrors `settings.indicators.showLocalCloudIndicator`; `AppCoordinator`
     /// keeps it in sync via `applyIndicatorSettings` on load and on every persisted
@@ -102,8 +107,10 @@ final class OverlayController: ObservableObject {
         state = machine.state
         if state.isVisible {
             showPanel()
+            panel?.ignoresMouseEvents = state != .confirmBack
         } else {
             panel?.orderOut(nil)
+            panel?.ignoresMouseEvents = true
         }
     }
 
@@ -132,7 +139,7 @@ final class OverlayController: ObservableObject {
         created.backgroundColor = .clear
         created.isOpaque = false
         created.hasShadow = false  // the SwiftUI card draws its own shadow
-        created.ignoresMouseEvents = true  // Phase 4 renders visuals only; no controls yet
+        created.ignoresMouseEvents = true
         // Ride across Spaces and over full-screen apps without ever activating.
         created.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
         panel = created

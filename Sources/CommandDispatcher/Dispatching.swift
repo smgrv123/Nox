@@ -6,4 +6,6 @@ import CommandRouter
 /// ran upstream, so dispatch does not re-gate on it.
 public protocol Dispatching: Sendable {
     func dispatch(_ intent: RoutedIntent, whisperAvgLogprob: Float) async -> DispatchOutcome
+    /// User already confirmed — skip the Confidence Gate and scanner, just execute.
+    func dispatchApproved(_ intent: RoutedIntent) async -> DispatchOutcome
 }
