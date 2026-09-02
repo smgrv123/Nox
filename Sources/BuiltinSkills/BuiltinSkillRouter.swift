@@ -32,6 +32,8 @@ public struct BuiltinSkillRouter: BuiltinSkillExecutor {
             return try CurrentTimeSkill.run(parameters: parameters, now: now())
         case "calculate":
             return try CalculateSkill.run(parameters: parameters)
+        case "unit_conversion":
+            return try UnitConversionSkill.run(parameters: parameters)
         case "general_qa":
             return GeneralQASkill.run()
         case "screen_qa":

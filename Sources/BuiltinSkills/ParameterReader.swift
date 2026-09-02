@@ -30,4 +30,15 @@ enum ParameterReader {
         }
         throw SkillExecutionError.missingParameter(key)
     }
+
+    static func requiredDouble(_ key: String, in parameters: JSONValue) throws -> Double {
+        let fields = try object(parameters)
+        if let double = fields[key]?.doubleValue {
+            return double
+        }
+        if let int = fields[key]?.intValue {
+            return Double(int)
+        }
+        throw SkillExecutionError.missingParameter(key)
+    }
 }

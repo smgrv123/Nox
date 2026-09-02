@@ -8,6 +8,7 @@ enum SkillExecutionError: Error, Equatable, LocalizedError {
     case missingParameter(String)
     case invalidParameters
     case unknownTimezone(String)
+    case unknownUnit(String)
     case unsupportedMediaAction(String)
 
     var errorDescription: String? {
@@ -20,6 +21,8 @@ enum SkillExecutionError: Error, Equatable, LocalizedError {
             return "parameters must be an object"
         case .unknownTimezone(let name):
             return "unknown timezone: \(name)"
+        case .unknownUnit(let name):
+            return "unknown unit: \(name)"
         case .unsupportedMediaAction(let action):
             return "unsupported media action: \(action)"
         }

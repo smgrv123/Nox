@@ -68,10 +68,16 @@ final class BuiltinManifestCatalogTests: XCTestCase {
             propertyTypes: ["region": "string"],
             requires: ["screen_recording"]
         ),
+        "unit_conversion": ExpectedRow(
+            riskTier: .low,
+            required: ["value", "from_unit", "to_unit"],
+            propertyTypes: ["value": "number", "from_unit": "string", "to_unit": "string"],
+            requires: []
+        ),
     ]
 
-    func testCatalogContainsExactlyNineManifests() {
-        XCTAssertEqual(BuiltinManifestCatalog.all.count, 9)
+    func testCatalogContainsExactlyTenManifests() {
+        XCTAssertEqual(BuiltinManifestCatalog.all.count, 10)
         let ids = Set(BuiltinManifestCatalog.all.map(\.id))
         XCTAssertEqual(ids, Set(expectedCatalog.keys))
     }
@@ -167,6 +173,12 @@ private func sampleParameters(for skillID: String) -> JSONValue {
         return objectParams(["action": .string("play")])
     case "take_screenshot":
         return objectParams(["region": .string("full")])
+    case "unit_conversion":
+        return objectParams([
+            "value": .double(10),
+            "from_unit": .string("miles"),
+            "to_unit": .string("kilometers"),
+        ])
     default:
         return objectParams()
     }

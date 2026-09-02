@@ -239,15 +239,15 @@ Covers length, mass, temperature, volume, speed, and area conversions.
 
 ### Acceptance criteria
 
-- [ ] "convert 10 miles to kilometers" → "16.09 km"
-- [ ] "how many pounds is 5 kilograms" → "11.02 lb"
-- [ ] Temperature conversions work (Celsius ↔ Fahrenheit ↔ Kelvin)
-- [ ] Unknown unit string → graceful error (not crash)
-- [ ] Same-unit conversion returns the input value
-- [ ] Manifest passes validation, risk tier `.low`
-- [ ] `BuiltinManifestCatalog.all` count is now 10
-- [ ] `BuiltinSkillRouter` routes `unit_conversion` to the new skill
-- [ ] `just check` green
+- [x] "convert 10 miles to kilometers" → "16.09 km"
+- [x] "how many pounds is 5 kilograms" → "11.02 lb"
+- [x] Temperature conversions work (Celsius ↔ Fahrenheit ↔ Kelvin)
+- [x] Unknown unit string → graceful error (not crash)
+- [x] Same-unit conversion returns the input value
+- [x] Manifest passes validation, risk tier `.low`
+- [x] `BuiltinManifestCatalog.all` count is now 10
+- [x] `BuiltinSkillRouter` routes `unit_conversion` to the new skill
+- [x] `just check` green
 
 ---
 

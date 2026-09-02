@@ -21,6 +21,7 @@ public enum ExecutableCommandRenderer: Sendable {
         "current_time",
         "general_qa",
         "screen_qa",
+        "unit_conversion",
     ]
 
     public static func isExecutable(_ skillID: String) -> Bool {

@@ -217,6 +217,7 @@ final class ManifestValidationTests: XCTestCase {
             "calculate",
             "general_qa",
             "screen_qa",
+            "unit_conversion",
         ]
 
         for name in fixtureNames {

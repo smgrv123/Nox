@@ -17,6 +17,7 @@ public enum BuiltinManifestCatalog {
         setTimer,
         mediaControl,
         takeScreenshot,
+        unitConversion,
     ]
 
     private static let currentTime = Manifest(
@@ -167,6 +168,29 @@ public enum BuiltinManifestCatalog {
         ),
         permissions: ManifestPermissions(requires: ["screen_recording"]),
         riskTier: .alwaysConfirm
+    )
+
+    private static let unitConversion = Manifest(
+        id: "unit_conversion",
+        kind: .builtin,
+        displayName: "Unit Conversion",
+        description:
+            "Convert a numeric value between length, mass, temperature, volume, speed, or area units.",
+        utteranceExamples: [
+            "convert 10 miles to kilometers",
+            "how many pounds is 5 kilograms",
+            "convert 32 fahrenheit to celsius",
+        ],
+        parameters: objectSchema(
+            required: ["value", "from_unit", "to_unit"],
+            properties: [
+                "value": .object(["type": .string("number")]),
+                "from_unit": stringProperty(minLength: 1, maxLength: 40),
+                "to_unit": stringProperty(minLength: 1, maxLength: 40),
+            ]
+        ),
+        permissions: ManifestPermissions(),
+        riskTier: .low
     )
 }
 
