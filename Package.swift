@@ -56,6 +56,9 @@ let package = Package(
         .library(name: "CommandRouter", targets: ["CommandRouter"]),
         // P4 Phase 5 · Dispatcher: Confidence Gate + scanner + skill invocation.
         .library(name: "CommandDispatcher", targets: ["CommandDispatcher"]),
+        // P4 Phase 6 · Built-in skill implementations. Pure skills are value-in →
+        // value-out; effectful skills call an injected `SystemSkillExecutor`.
+        .library(name: "BuiltinSkills", targets: ["BuiltinSkills"]),
     ],
     targets: [
         .target(name: "AideCore"),
@@ -212,6 +215,12 @@ let package = Package(
                 "SkillRegistry",
             ]
         ),
+        // P4 Phase 6 · v1 built-in skills. No AppKit — effectful work goes through
+        // `SystemSkillExecutor` so the App layer injects NSWorkspace / notifications.
+        .target(
+            name: "BuiltinSkills",
+            dependencies: ["CommandDispatcher", "SkillManifest"]
+        ),
         // P2b Phase 4 · the pure LLM-runtime heart, playing the role `SpeechToText`
         // played for P2a: `LlmTierPolicy` (Tier → Qwen `ModelDescriptor`) today; the
         // `LLMClient`/`SidecarController` seams, backoff schedule, and idle-unload state
@@ -345,6 +354,16 @@ let package = Package(
                 "SkillRegistry",
                 "AideCore",
             ]
+        ),
+        .testTarget(
+            name: "BuiltinSkillsTests",
+            dependencies: [
+                "BuiltinSkills",
+                "CommandDispatcher",
+                "SkillManifest",
+                "AideCore",
+            ],
+            resources: [.copy("Fixtures")]
         ),
     ]
 )

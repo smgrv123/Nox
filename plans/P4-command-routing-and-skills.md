@@ -200,20 +200,20 @@ The `BuiltinSkills` module: Swift implementations of the v1 skill set. Pure skil
 
 ### Acceptance criteria
 
-- [ ] `CurrentTimeSkill` returns the correct time for "UTC", "Asia/Tokyo", "America/New_York"
-- [ ] `CurrentTimeSkill` returns local time when no timezone is specified
-- [ ] `CalculateSkill` evaluates `"15% of 230"` (or `"0.15 * 230"`) correctly
-- [ ] `CalculateSkill` handles basic arithmetic: `+`, `-`, `*`, `/`, `%`, parentheses
-- [ ] `CalculateSkill` returns a human-readable error for malformed expressions (never crashes)
-- [ ] `GeneralQASkill` stub returns a "not yet available" message
-- [ ] `ScreenQASkill` stub returns a "not yet available" message
-- [ ] `OpenApplicationSkill` protocol method is called with the correct app name
-- [ ] `QuitApplicationSkill` protocol method is called with the correct app name
-- [ ] `SetTimerSkill` protocol method is called with the correct duration and label
-- [ ] `MediaControlSkill` protocol method is called with the correct action
-- [ ] `TakeScreenshotSkill` protocol method is called with the correct region
-- [ ] Each skill has a corresponding valid manifest fixture
-- [ ] Module registered in `Package.swift`; `just check` passes
+- [x] `CurrentTimeSkill` returns the correct time for "UTC", "Asia/Tokyo", "America/New_York"
+- [x] `CurrentTimeSkill` returns local time when no timezone is specified
+- [x] `CalculateSkill` evaluates `"15% of 230"` (or `"0.15 * 230"`) correctly
+- [x] `CalculateSkill` handles basic arithmetic: `+`, `-`, `*`, `/`, `%`, parentheses
+- [x] `CalculateSkill` returns a human-readable error for malformed expressions (never crashes)
+- [x] `GeneralQASkill` stub returns a "not yet available" message
+- [x] `ScreenQASkill` stub returns a "not yet available" message
+- [x] `OpenApplicationSkill` protocol method is called with the correct app name
+- [x] `QuitApplicationSkill` protocol method is called with the correct app name
+- [x] `SetTimerSkill` protocol method is called with the correct duration and label
+- [x] `MediaControlSkill` protocol method is called with the correct action
+- [x] `TakeScreenshotSkill` protocol method is called with the correct region
+- [x] Each skill has a corresponding valid manifest fixture
+- [x] Module registered in `Package.swift`; `just check` passes
 
 ---
 

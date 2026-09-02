@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "media_control",
+  "kind": "builtin",
+  "display_name": "Media Control",
+  "description": "Control media playback: play, pause, skip to next or previous track.",
+  "utterance_examples": ["pause the music", "play", "next track", "skip song", "previous"],
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["action"],
+    "properties": {
+      "action": { "type": "string", "enum": ["play", "pause", "toggle", "next", "previous"] }
+    }
+  },
+  "permissions": { "network": false, "requires": [] },
+  "schedule": null,
+  "risk_tier": "low",
+  "enabled": true,
+  "script_ref": null,
+  "generated_by": "builtin"
+}
