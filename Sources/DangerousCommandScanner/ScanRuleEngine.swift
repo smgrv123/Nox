@@ -62,6 +62,7 @@ enum ScanRuleEngine {
             ScanRules.c8ShellProfileEdit,
             ScanRules.c9GitDestructive,
             ScanRules.c10BulkMoveDelete,
+            ScanRules.c7PathRestriction,
         ]
         for rule in nodeRules {
             if let finding = rule(node) {
@@ -97,6 +98,9 @@ extension ScanRuleEngine {
             findings.append(finding)
         }
         if let finding = ScanRules.c8RedirectToProfile(rawInput: rawInput) {
+            findings.append(finding)
+        }
+        if let finding = ScanRules.c7RedirectPathRestriction(rawInput: rawInput) {
             findings.append(finding)
         }
     }
