@@ -135,12 +135,12 @@ extension ShellScanner {
 
     private mutating func scanOctalEscape() -> Unicode.Scalar? {
         var octal = ""
-        var count = 0
-        while count < 3, pos < chars.count,
-            let digit = chars[pos].asciiValue, digit >= 0x30, digit <= 0x37 {
+        for _ in 0..<3 {
+            guard pos < chars.count, let digit = chars[pos].asciiValue,
+                (0x30...0x37).contains(digit)
+            else { break }
             octal.append(chars[pos])
             pos += 1
-            count += 1
         }
         guard !octal.isEmpty, let value = UInt32(octal, radix: 8),
             let scalar = Unicode.Scalar(value)
