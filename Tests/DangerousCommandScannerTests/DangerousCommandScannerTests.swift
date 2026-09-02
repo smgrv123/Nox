@@ -109,6 +109,9 @@ final class DangerousCommandScannerTests: XCTestCase {
     func testContextParameterAcceptsExplicitValue() {
         let ctx = ScanContext(channel: .dictatedOneOff, destinationBundleID: "com.apple.Terminal")
         let verdict = scanner.scan("echo hello", context: ctx)
-        XCTAssertEqual(verdict, .clean)
+        guard case .confirm(let findings) = verdict else {
+            return XCTFail("Dictation into terminal should trigger C11 confirm")
+        }
+        XCTAssertTrue(findings.contains(where: { $0.rule == .dictationIntoTerminal }))
     }
 }
