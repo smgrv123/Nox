@@ -5,7 +5,7 @@
 ///
 /// **Pipeline:** tokenize (Phase 1) → parse into tree (Phase 2) → evaluate
 /// structural rules + combine verdict (Phase 3).
-public struct DangerousCommandScanner: Sendable {
+public struct DangerousCommandScanner: CommandScanning {
 
     public init() {}
 
@@ -15,7 +15,7 @@ public struct DangerousCommandScanner: Sendable {
     /// 2. Parses into a `CommandNode` tree via `CommandTreeParser`.
     /// 3. Walks every node, evaluating structural rules (H1–H7, C1–C12).
     /// 4. Combines findings into a verdict: hardBlock > confirm > clean.
-    public func scan(_ command: String, context: ScanContext = .init()) -> ScanVerdict {
+    public func scan(_ command: String, context: ScanContext) -> ScanVerdict {
         let tokens = ShellTokenizer.tokenize(command)
         let parseResult = CommandTreeParser.parse(tokens)
         return ScanRuleEngine.evaluate(
