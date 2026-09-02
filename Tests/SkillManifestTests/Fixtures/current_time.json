@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "current_time",
+  "kind": "builtin",
+  "display_name": "Current Time",
+  "description": "Tell the user the current date, time, or both in their local timezone.",
+  "utterance_examples": ["what time is it", "what's the date", "current time"],
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [],
+    "properties": {}
+  },
+  "permissions": { "network": false, "requires": [] },
+  "schedule": null,
+  "risk_tier": "low",
+  "enabled": true,
+  "script_ref": null,
+  "generated_by": "builtin"
+}

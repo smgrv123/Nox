@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "take_screenshot",
+  "kind": "builtin",
+  "display_name": "Take Screenshot",
+  "description": "Capture a screenshot of the current screen or a selected region.",
+  "utterance_examples": ["take a screenshot", "screenshot", "capture screen"],
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [],
+    "properties": {
+      "region": { "type": "string", "enum": ["full_screen", "selection"], "default": "full_screen" }
+    }
+  },
+  "permissions": { "network": false, "requires": ["screen_recording"] },
+  "schedule": null,
+  "risk_tier": "low",
+  "enabled": true,
+  "script_ref": null,
+  "generated_by": "builtin"
+}

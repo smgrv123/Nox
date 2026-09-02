@@ -47,6 +47,9 @@ let package = Package(
         // JSON/SSE parsing) is genuinely unit-testable headlessly against a `URLProtocol`
         // stub, so it stays in the fast `swift test` gate instead of being opt-in-only.
         .library(name: "InferenceClient", targets: ["InferenceClient"]),
+        // P4 Phase 1 · Skill/Automation Manifest model: the `Manifest` struct, `JSONValue`
+        // recursive enum, supporting types, and `ManifestValidation` (docs/05-lld.md §2.1).
+        .library(name: "SkillManifest", targets: ["SkillManifest"]),
     ],
     targets: [
         .target(name: "AideCore"),
@@ -173,6 +176,12 @@ let package = Package(
             name: "ModelDownloader",
             dependencies: ["ModelProvisioning"]
         ),
+        // P4 Phase 1 · Skill/Automation Manifest model + JSONValue + validation
+        // (docs/05-lld.md §2.1). Depends only on AideCore for `RiskTier`.
+        .target(
+            name: "SkillManifest",
+            dependencies: ["AideCore"]
+        ),
         // P2b Phase 4 · the pure LLM-runtime heart, playing the role `SpeechToText`
         // played for P2a: `LlmTierPolicy` (Tier → Qwen `ModelDescriptor`) today; the
         // `LLMClient`/`SidecarController` seams, backoff schedule, and idle-unload state
@@ -279,6 +288,14 @@ let package = Package(
         .testTarget(
             name: "InferenceClientTests",
             dependencies: ["InferenceClient", "LLMRuntime"]
+        ),
+        // P4 Phase 1 · Headless unit suite for the Manifest model, JSONValue recursive
+        // enum, and ManifestValidation: round-trip encoding, fixture decoding, and
+        // defensive rejection of malformed manifests.
+        .testTarget(
+            name: "SkillManifestTests",
+            dependencies: ["SkillManifest", "AideCore"],
+            resources: [.copy("Fixtures")]
         ),
     ]
 )

@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "general_qa",
+  "kind": "builtin",
+  "display_name": "General Q&A",
+  "description": "Answer a general knowledge question using the local LLM.",
+  "utterance_examples": ["who wrote Hamlet", "what is the capital of France", "explain quantum computing"],
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["question"],
+    "properties": {
+      "question": { "type": "string", "minLength": 1, "maxLength": 2000 }
+    }
+  },
+  "permissions": { "network": false, "requires": [] },
+  "schedule": null,
+  "risk_tier": "low",
+  "enabled": true,
+  "script_ref": null,
+  "generated_by": "builtin"
+}

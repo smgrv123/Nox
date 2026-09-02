@@ -37,15 +37,15 @@ Create a `SkillManifest` SwiftPM module (no dependencies beyond Foundation) cont
 
 ### Acceptance criteria
 
-- [ ] `JSONValue` encodes/decodes all JSON types including nested objects and arrays
-- [ ] `Manifest` round-trips (encode → decode → re-encode) for a valid built-in manifest
-- [ ] `Manifest` round-trips for a valid `user_automation` manifest (with `script_ref`, `script_sha256`, `schedule`)
-- [ ] `ManifestValidation` rejects an id that doesn't match `^[a-z][a-z0-9_]{2,63}$`
-- [ ] `ManifestValidation` rejects a `user_automation` manifest missing `script_ref`
-- [ ] `ManifestValidation` rejects a `builtin` manifest that has `script_ref != null`
-- [ ] `ManifestValidation` accepts all v1 fixture manifests
-- [ ] `failure_state` fields have correct defaults when absent from JSON
-- [ ] Module registered in `Package.swift`; `just check` passes
+- [x] `JSONValue` encodes/decodes all JSON types including nested objects and arrays
+- [x] `Manifest` round-trips (encode → decode → re-encode) for a valid built-in manifest
+- [x] `Manifest` round-trips for a valid `user_automation` manifest (with `script_ref`, `script_sha256`, `schedule`)
+- [x] `ManifestValidation` rejects an id that doesn't match `^[a-z][a-z0-9_]{2,63}$`
+- [x] `ManifestValidation` rejects a `user_automation` manifest missing `script_ref`
+- [x] `ManifestValidation` rejects a `builtin` manifest that has `script_ref != null`
+- [x] `ManifestValidation` accepts all v1 fixture manifests
+- [x] `failure_state` fields have correct defaults when absent from JSON
+- [x] Module registered in `Package.swift`; `just check` passes
 
 ---
 
