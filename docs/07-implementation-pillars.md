@@ -119,5 +119,5 @@ Each pillar gets, in order:
 |---|---|
 | P1 Platform & Shell | **Complete** — all 11 phases shipped (`plans/P1-platform-and-shell.md`) |
 | P2 Inference Core | **Complete** — P2a · Speech-to-Text (all 5 phases) + P2b · LLM Runtime (all 6 phases) shipped |
-| P3 Safety Guard | In progress — scanner module exists with 10 tests; spec + plan written (`plans/P3-safety-guard.md`), 6 phases to execute |
+| P3 Safety Guard | **Complete** — all 6 phases shipped (`plans/P3-safety-guard.md`); recursive-descent scanner with 370 tests |
 | P4, P5, P6, P7 | Not started |
