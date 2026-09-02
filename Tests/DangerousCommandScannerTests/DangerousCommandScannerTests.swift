@@ -28,6 +28,18 @@ final class DangerousCommandScannerTests: XCTestCase {
         }
     }
 
+    func testForkBombIsHardBlocked() {
+        guard case .hardBlock = scanner.scan(":(){ :|:& };:") else {
+            return XCTFail("fork bomb must be a hard block")
+        }
+    }
+
+    func testDdToDeviceIsHardBlocked() {
+        guard case .hardBlock = scanner.scan("dd if=/dev/zero of=/dev/disk2 bs=1m") else {
+            return XCTFail("dd to a device must be a hard block")
+        }
+    }
+
     // MARK: - Confirm tier (dangerous, overridable)
 
     func testRmRfIsConfirm() {
@@ -48,31 +60,58 @@ final class DangerousCommandScannerTests: XCTestCase {
         }
     }
 
-    func testForkBombIsConfirm() {
-        guard case .confirm = scanner.scan(":(){ :|:& };:") else {
-            return XCTFail("fork bomb must require confirmation")
-        }
-    }
-
-    func testDdToDeviceIsConfirm() {
-        guard case .confirm = scanner.scan("dd if=/dev/zero of=/dev/disk2 bs=1m") else {
-            return XCTFail("dd to a device must require confirmation")
-        }
-    }
-
     // MARK: - Allow (safe commands)
 
     func testPlainCommandsAllowed() {
-        XCTAssertEqual(scanner.scan("ls -la ~/Projects"), .allow)
-        XCTAssertEqual(scanner.scan("git status"), .allow)
-        XCTAssertEqual(scanner.scan("echo 'sudoku is fun'"), .allow)  // must not match 'sudo' inside 'sudoku'
-        XCTAssertEqual(scanner.scan("rm build.log"), .allow)  // non-recursive rm is not flagged here
+        XCTAssertEqual(scanner.scan("ls -la ~/Projects"), .clean)
+        XCTAssertEqual(scanner.scan("git status"), .clean)
+        XCTAssertEqual(scanner.scan("echo 'sudoku is fun'"), .clean)
+        XCTAssertEqual(scanner.scan("rm build.log"), .clean)
     }
 
     func testHardBlockBeatsConfirmWhenBothPresent() {
-        // sudo (hard) co-occurs with rm -rf (confirm) — hard block must win.
         guard case .hardBlock = scanner.scan("sudo rm -rf /var") else {
             return XCTFail("hard block must take precedence over confirm")
         }
+    }
+
+    // MARK: - Finding structure
+
+    func testHardBlockFindingCarriesRuleID() {
+        guard case .hardBlock(let findings) = scanner.scan("sudo reboot") else {
+            return XCTFail("expected hard block")
+        }
+        XCTAssertFalse(findings.isEmpty)
+        XCTAssertEqual(findings[0].severity, .hardBlock)
+        XCTAssertEqual(findings[0].rule, .privilegeEscalation)
+    }
+
+    func testConfirmFindingCarriesRuleID() {
+        guard case .confirm(let findings) = scanner.scan("rm -rf /tmp/junk") else {
+            return XCTFail("expected confirm")
+        }
+        XCTAssertFalse(findings.isEmpty)
+        XCTAssertEqual(findings[0].severity, .confirm)
+        XCTAssertEqual(findings[0].rule, .recursiveDelete)
+    }
+
+    func testCleanHasNoFindings() {
+        XCTAssertEqual(scanner.scan("echo hello").findings, [])
+    }
+
+    // MARK: - Context parameter
+
+    func testContextParameterDefaultsWithoutBreaking() {
+        let verdict = scanner.scan("echo hello")
+        XCTAssertEqual(verdict, .clean)
+    }
+
+    func testContextParameterAcceptsExplicitValue() {
+        let ctx = ScanContext(channel: .dictatedOneOff, destinationBundleID: "com.apple.Terminal")
+        let verdict = scanner.scan("echo hello", context: ctx)
+        guard case .confirm(let findings) = verdict else {
+            return XCTFail("Dictation into terminal should trigger C11 confirm")
+        }
+        XCTAssertTrue(findings.contains(where: { $0.rule == .dictationIntoTerminal }))
     }
 }
