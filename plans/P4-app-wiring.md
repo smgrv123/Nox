@@ -138,14 +138,14 @@ Swap `SystemSkillExecutorLive()` into the composition root in place of the stub.
 
 ### Acceptance criteria
 
-- [ ] `SystemSkillExecutorLive` conforms to `SystemSkillExecutor` — no stubs or `fatalError`
-- [ ] "open Safari" → Safari launches or focuses
-- [ ] "quit TextEdit" → TextEdit terminates (if running)
-- [ ] "set a timer for 10 seconds" → notification fires after 10 seconds
-- [ ] "play" / "pause" / "next track" → media key event sent
-- [ ] "take a screenshot" → screenshot file saved, path in result summary
-- [ ] `just check` green
-- [ ] `just app` builds
+- [x] `SystemSkillExecutorLive` conforms to `SystemSkillExecutor` — no stubs or `fatalError`
+- [x] "open Safari" → Safari launches or focuses
+- [x] "quit TextEdit" → TextEdit terminates (if running)
+- [x] "set a timer for 10 seconds" → notification fires after 10 seconds
+- [x] "play" / "pause" / "next track" → media key event sent
+- [x] "take a screenshot" → screenshot file saved, path in result summary
+- [x] `just check` green
+- [x] `just app` builds
 
 ---
 

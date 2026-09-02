@@ -60,7 +60,7 @@ extension AppCoordinator {
         let dispatcher = CommandDispatcher(
             registry: registry,
             scanner: DangerousCommandScanner(),
-            executor: BuiltinSkillRouter(system: StubSystemSkillExecutor()),
+            executor: BuiltinSkillRouter(system: SystemSkillExecutorLive()),
             thresholds: .provisional
         )
         let logURL =
