@@ -54,6 +54,8 @@ let package = Package(
         .library(name: "SkillRegistry", targets: ["SkillRegistry"]),
         // P4 Phase 3 · Router Contract v2 parse + logprob-derived routing confidence.
         .library(name: "CommandRouter", targets: ["CommandRouter"]),
+        // P4 Phase 5 · Dispatcher: Confidence Gate + scanner + skill invocation.
+        .library(name: "CommandDispatcher", targets: ["CommandDispatcher"]),
     ],
     targets: [
         .target(name: "AideCore"),
@@ -198,6 +200,18 @@ let package = Package(
             name: "CommandRouter",
             dependencies: ["AideCore", "SkillManifest", "LLMRuntime"]
         ),
+        // P4 Phase 5 · applies Confidence Gate, scans executable skills, invokes
+        // BuiltinSkillExecutor (docs/05-lld.md §3.1). Depends on seams, never App/.
+        .target(
+            name: "CommandDispatcher",
+            dependencies: [
+                "AideCore",
+                "CommandRouter",
+                "DangerousCommandScanner",
+                "SkillManifest",
+                "SkillRegistry",
+            ]
+        ),
         // P2b Phase 4 · the pure LLM-runtime heart, playing the role `SpeechToText`
         // played for P2a: `LlmTierPolicy` (Tier → Qwen `ModelDescriptor`) today; the
         // `LLMClient`/`SidecarController` seams, backoff schedule, and idle-unload state
@@ -320,6 +334,17 @@ let package = Package(
         .testTarget(
             name: "CommandRouterTests",
             dependencies: ["CommandRouter", "SkillManifest", "LLMRuntime", "AideCore"]
+        ),
+        .testTarget(
+            name: "CommandDispatcherTests",
+            dependencies: [
+                "CommandDispatcher",
+                "CommandRouter",
+                "DangerousCommandScanner",
+                "SkillManifest",
+                "SkillRegistry",
+                "AideCore",
+            ]
         ),
     ]
 )

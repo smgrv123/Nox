@@ -156,21 +156,22 @@ The `CommandDispatcher` module: takes a `RoutedIntent`, applies the `ConfidenceG
 - `SkillResult` — `let summary: String` (what happened, shown in the Overlay).
 - `ConfirmBackPrompt` — `intent: String`, `skillID: String`, `findings: [Finding]?` (scanner findings if present), `riskTier: RiskTier`.
 - `Dispatching` protocol (DI seam) — `dispatch(_:routingConfidence:whisperAvgLogprob:) async -> DispatchOutcome`.
-- `CommandDispatcherImpl` — constructed with a `SkillRegistering`, a `CommandScanning`, a `BuiltinSkillExecutor`, and `RoutingThresholds`. Applies the gate, calls the scanner on executable channels (context: `.preExecution`), invokes the skill executor.
-- Dispatcher follows the LLD §3.1 dispatch decision order exactly: gate first, then scanner, then execute.
+- `CommandDispatcherImpl` — constructed with a `SkillRegistering`, a `CommandScanning`, a `BuiltinSkillExecutor`, and `RoutingThresholds`. Scans executable channels (context: `.preExecution`), applies the gate, then invokes the skill executor.
+- Dispatcher follows the LLD §3.1 dispatch decision order exactly: scanner on executable channels first (Hard-Block cannot be skipped), then Confidence Gate, then execute.
 
 ### Acceptance criteria
 
-- [ ] Clean gate + clean scan → `.executed` with the skill result
-- [ ] Clean gate + scanner `confirm` → `.confirmBack` with findings
-- [ ] Clean gate + scanner `hardBlock` → `.hardBlocked` with reason
-- [ ] Gate `.promptBack` → `.promptedBack` (scanner never called)
-- [ ] Gate `.confirmBack` → `.confirmBack` (scanner still called; findings merged if any)
-- [ ] Skill execution throws → `.failed`
-- [ ] `general_qa` / `screen_qa` are dispatched but produce stub "not yet available" results
-- [ ] Scanner is called with `ScanContext(channel: .preExecution)` for built-in skills that produce commands
-- [ ] Scanner is NOT called for pure compute skills (calc, time) that produce no executable
-- [ ] Module registered in `Package.swift`; `just check` passes
+- [x] Clean gate + clean scan → `.executed` with the skill result
+- [x] Clean gate + scanner `confirm` → `.confirmBack` with findings
+- [x] Clean gate + scanner `hardBlock` → `.hardBlocked` with reason
+- [x] Gate `.promptBack` → `.promptedBack` after a clean scan (scanner **is** called for executable skills; skipped for pure skills / nil skillID / schema failure)
+- [x] Weak-confidence executable + scanner `hardBlock` → `.hardBlocked` (Hard-Block is not skipped by the gate)
+- [x] Gate `.confirmBack` → `.confirmBack` (scanner still called; findings merged if any)
+- [x] Skill execution throws → `.failed`
+- [x] `general_qa` / `screen_qa` are dispatched but produce stub "not yet available" results
+- [x] Scanner is called with `ScanContext(channel: .preExecution)` for built-in skills that produce commands
+- [x] Scanner is NOT called for pure compute skills (calc, time) that produce no executable
+- [x] Module registered in `Package.swift`; `just check` passes
 
 ---
 
