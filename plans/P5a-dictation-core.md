@@ -150,10 +150,10 @@ Keep existing `Tests/DangerousCommandScannerTests` C11 cases green; do not edit 
 
 ### Acceptance criteria
 
-- [ ] Named tests pass.
-- [ ] Scanner C11 corpus still green.
+- [x] Named tests pass.
+- [x] Scanner C11 corpus still green.
 - [ ] Manual: dictating into Terminal shows Confirm-Back; Approve pastes/inserts; Reject leaves the prompt unchanged.
-- [ ] Per-phase gate green.
+- [x] Per-phase gate green.
 
 ---
 

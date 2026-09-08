@@ -4,12 +4,6 @@ import Foundation
 /// producing a `ScanVerdict` (LLD §4.3 Phase C + Phase D).
 enum ScanRuleEngine {
 
-    static let terminalBundleIDs: Set<String> = [
-        "com.apple.Terminal", "com.googlecode.iterm2", "dev.warp.Warp-Stable",
-        "com.mitchellh.ghostty", "net.kovidgoyal.kitty", "org.alacritty",
-        "com.github.wez.wezterm",
-    ]
-
     /// C1–C10 rule IDs that H7 (Aide automation) escalates to hard-block.
     private static let h7EscalationTargets: Set<RuleID> = [
         .recursiveDelete, .secureErase, .pipedRemoteExecution,
@@ -128,7 +122,7 @@ extension ScanRuleEngine {
     ) {
         guard context.channel == .dictatedOneOff,
             let bundleID = context.destinationBundleID,
-            terminalBundleIDs.contains(bundleID)
+            TerminalBundleIDs.allowlist.contains(bundleID)
         else { return }
         findings.append(
             Finding(

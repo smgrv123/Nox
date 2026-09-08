@@ -1,14 +1,16 @@
 import AideCore
+import DangerousCommandScanner
 import Foundation
 import SpeechToText
 
-/// Dictation-mode `VoiceSessionDriver`: capture → transcribe → Pre-Gate → insert
-/// at the caret (plans/P5a-dictation-core.md Phase 1). Overlay/coordinator stay
-/// unchanged; the mux swaps this in for `STTVoiceSessionDriver` on `.dictation`.
+/// Dictation-mode `VoiceSessionDriver`: capture → transcribe → Pre-Gate →
+/// terminal-destination scan → insert at the caret (plans/P5a-dictation-core.md
+/// Phase 2). Overlay/coordinator stay unchanged; the mux swaps this in for
+/// `STTVoiceSessionDriver` on `.dictation`.
 ///
-/// Depends only on `STTEngine`, `AudioCaptureBuffer`, `SegmentPreGate`, and
-/// `TextInserting` — tests inject mocks; `App/TextInserterLive.swift` is the
-/// AppKit shell.
+/// Depends only on `STTEngine`, `AudioCaptureBuffer`, `SegmentPreGate`,
+/// `TextInserting`, and `CommandScanning` — tests inject mocks;
+/// `App/TextInserterLive.swift` is the AppKit shell.
 public final class DictationDriver: VoiceSessionDriver {
 
     public var onUpdate: ((VoiceSessionUpdate) -> Void)?
@@ -21,6 +23,7 @@ public final class DictationDriver: VoiceSessionDriver {
     private let capture: any AudioCaptureBuffer
     private let preGate: SegmentPreGate
     private let inserter: any TextInserting
+    private let scanner: any CommandScanning
     private let planner = InsertionPlanner()
     private let overrides: @Sendable () -> [String: AppInsertionOverride]
     private let makeInitialPrompt: @Sendable () async -> String?
@@ -29,12 +32,20 @@ public final class DictationDriver: VoiceSessionDriver {
     private var generation = 0
     private var activeMode: VoiceSessionMode = .dictation
     private var captureTask: Task<Bool, Never>?
+    private var pendingInsert: PendingInsert?
+
+    private struct PendingInsert {
+        let text: String
+        let plan: InsertionPlan
+        let generation: Int
+    }
 
     public init(
         engine: any STTEngine,
         capture: any AudioCaptureBuffer,
         preGate: SegmentPreGate,
         inserter: any TextInserting,
+        scanner: any CommandScanning,
         overrides: @escaping @Sendable () -> [String: AppInsertionOverride] = { [:] },
         makeInitialPrompt: @escaping @Sendable () async -> String? = { nil },
         dictionarySubstitutions: @escaping @Sendable () async -> String = { "" }
@@ -43,6 +54,7 @@ public final class DictationDriver: VoiceSessionDriver {
         self.capture = capture
         self.preGate = preGate
         self.inserter = inserter
+        self.scanner = scanner
         self.overrides = overrides
         self.makeInitialPrompt = makeInitialPrompt
         self.dictionarySubstitutions = dictionarySubstitutions
@@ -50,6 +62,7 @@ public final class DictationDriver: VoiceSessionDriver {
 
     public func begin(mode: VoiceSessionMode) {
         generation &+= 1
+        pendingInsert = nil
         activeMode = mode
 
         captureTask = Task { @MainActor [weak self] in
@@ -90,11 +103,35 @@ public final class DictationDriver: VoiceSessionDriver {
 
     public func cancel() {
         generation &+= 1
+        pendingInsert = nil
         let capture = self.capture
         let started = captureTask
         Task {
             _ = await started?.value
             await capture.discard()
+        }
+    }
+
+    public func approve() {
+        guard let pending = pendingInsert else { return }
+        pendingInsert = nil
+        let generation = pending.generation
+        Task { @MainActor [weak self] in
+            guard let self, self.generation == generation else { return }
+            await self.performInsert(pending.text, plan: pending.plan, generation: generation)
+        }
+    }
+
+    public func reject() {
+        guard let pending = pendingInsert else { return }
+        pendingInsert = nil
+        let generation = pending.generation
+        let text = pending.text
+        Task { @MainActor [weak self] in
+            guard let self, self.generation == generation else { return }
+            self.deliver(
+                .result(VoiceSessionResult(transcript: text, summary: "Cancelled.")),
+                generation: generation)
         }
     }
 
@@ -110,7 +147,7 @@ public final class DictationDriver: VoiceSessionDriver {
 
             switch preGate.evaluate(transcription, mode: mode) {
             case .pass(let text, _):
-                await insertAndDeliver(text, generation: generation)
+                await scanThenInsert(text, generation: generation)
             case .fail:
                 deliver(.result(Self.degraded(Self.reAskSummary)), generation: generation)
             }
@@ -120,10 +157,46 @@ public final class DictationDriver: VoiceSessionDriver {
     }
 
     @MainActor
-    private func insertAndDeliver(_ text: String, generation: Int) async {
+    private func scanThenInsert(_ text: String, generation: Int) async {
         let focus = await inserter.resolveFocus()
         let override = focus.bundleID.flatMap { overrides()[$0] }
-        let plan = planner.plan(focus: focus, override: override, isTerminal: false)
+        let isTerminal = focus.bundleID.map(TerminalBundleAllowlist.contains) ?? false
+        let plan = planner.plan(focus: focus, override: override, isTerminal: isTerminal)
+
+        if isTerminal, let bundleID = focus.bundleID {
+            let verdict = scanner.scan(
+                text,
+                context: ScanContext(
+                    channel: .dictatedOneOff,
+                    destinationBundleID: bundleID,
+                    manifestID: nil))
+            switch verdict {
+            case .clean:
+                break
+            case .confirm:
+                pendingInsert = PendingInsert(text: text, plan: plan, generation: generation)
+                deliver(
+                    .confirmBack(
+                        ConfirmBackInfo(
+                            transcript: text,
+                            intent: text,
+                            skillID: "dictation_insert",
+                            riskTier: .alwaysConfirm)),
+                    generation: generation)
+                return
+            case .hardBlock(let findings):
+                deliver(
+                    .hardBlocked(text, findings.first?.explanation ?? "Blocked"),
+                    generation: generation)
+                return
+            }
+        }
+
+        await performInsert(text, plan: plan, generation: generation)
+    }
+
+    @MainActor
+    private func performInsert(_ text: String, plan: InsertionPlan, generation: Int) async {
         let insertion = await inserter.insert(text, plan: plan)
         guard self.generation == generation else { return }
 

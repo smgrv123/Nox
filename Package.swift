@@ -245,9 +245,10 @@ let package = Package(
         ),
         // P5a · Dictation Core — planner + VoiceSessionDriver that inserts at the
         // caret. No AppKit; the live inserter is App/TextInserterLive.swift.
+        // Terminal-destination scanning uses DangerousCommandScanner (Phase 2).
         .target(
             name: "Dictation",
-            dependencies: ["AideCore", "SpeechToText"]
+            dependencies: ["AideCore", "SpeechToText", "DangerousCommandScanner"]
         ),
         // P2b Phase 4 · the pure LLM-runtime heart, playing the role `SpeechToText`
         // played for P2a: `LlmTierPolicy` (Tier → Qwen `ModelDescriptor`) today; the
@@ -410,7 +411,7 @@ let package = Package(
         ),
         .testTarget(
             name: "DictationTests",
-            dependencies: ["Dictation", "AideCore", "SpeechToText"]
+            dependencies: ["Dictation", "AideCore", "SpeechToText", "DangerousCommandScanner"]
         ),
     ]
 )
