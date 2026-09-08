@@ -1,4 +1,6 @@
 import DangerousCommandScanner
+import Foundation
+import LLMRuntime
 import SpeechToText
 
 @testable import Dictation
@@ -96,12 +98,28 @@ func hardBlockFinding(explanation: String = "Privilege escalation via sudo is ne
 let dictationTestPCM = PCMBuffer(
     samples: [0.1, -0.1, 0.2], sampleRate: PCMBuffer.whisperSampleRate)
 
+enum DictationTestError: Error {
+    case endpointUnavailable
+}
+
+func dictationTestEndpoint(isLocal: Bool = true) -> LLMEndpoint {
+    LLMEndpoint(
+        baseURL: URL(string: "http://127.0.0.1:1")!,
+        model: "test",
+        isLocal: isLocal)
+}
+
 @MainActor
 func makeDictationDriver(
     engine: MockSTTEngine,
     capture: FakeCaptureBuffer,
     inserter: RecordingInserter,
     scanner: any CommandScanning = RecordingCommandScanner(),
+    llm: any LLMClient = MockLLMClient(),
+    resolveEndpoint: @escaping @Sendable () async throws -> LLMEndpoint = {
+        throw DictationTestError.endpointUnavailable
+    },
+    tonePreset: @escaping @Sendable () -> TonePreset = { .asIs },
     overrides: @escaping @Sendable () -> [String: AppInsertionOverride] = { [:] }
 ) -> DictationDriver {
     DictationDriver(
@@ -110,6 +128,9 @@ func makeDictationDriver(
         preGate: SegmentPreGate(thresholds: .provisional),
         inserter: inserter,
         scanner: scanner,
+        llm: llm,
+        resolveEndpoint: resolveEndpoint,
+        tonePreset: tonePreset,
         overrides: overrides)
 }
 

@@ -91,7 +91,10 @@ extension DictationDriverTests {
         XCTAssertEqual(inserter.inserted.map(\.plan), [.axThenPaste])
         XCTAssertEqual(
             updates.last,
-            .result(VoiceSessionResult(transcript: "hello world", summary: "hello world")))
+            .result(
+                VoiceSessionResult(
+                    transcript: "hello world",
+                    summary: "hello world")))
     }
 
     func testRejectDoesNotInsert() async {

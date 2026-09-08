@@ -32,7 +32,10 @@ final class DictationDriverTests: XCTestCase {
             updates,
             [
                 .transcript("hello world"),
-                .result(VoiceSessionResult(transcript: "hello world", summary: "hello world")),
+                .result(
+                    VoiceSessionResult(
+                        transcript: "hello world",
+                        summary: "hello world")),
             ])
     }
 

@@ -63,7 +63,7 @@ let package = Package(
         // dispatches, plus the day-one CalibrationLogger JSONL harness (LLD §4.2).
         .library(name: "CommandMode", targets: ["CommandMode"]),
         // P5a · Dictation Core: insertion planner + DictationDriver (capture →
-        // transcribe → insert). AppKit/AX lives in App/TextInserterLive.swift.
+        // transcribe → tone cleanup → insert). AppKit/AX lives in App/TextInserterLive.swift.
         .library(name: "Dictation", targets: ["Dictation"]),
     ],
     targets: [
@@ -246,9 +246,10 @@ let package = Package(
         // P5a · Dictation Core — planner + VoiceSessionDriver that inserts at the
         // caret. No AppKit; the live inserter is App/TextInserterLive.swift.
         // Terminal-destination scanning uses DangerousCommandScanner (Phase 2).
+        // Tone cleanup uses LLMRuntime's `LLMClient` seam (never InferenceClient).
         .target(
             name: "Dictation",
-            dependencies: ["AideCore", "SpeechToText", "DangerousCommandScanner"]
+            dependencies: ["AideCore", "SpeechToText", "DangerousCommandScanner", "LLMRuntime"]
         ),
         // P2b Phase 4 · the pure LLM-runtime heart, playing the role `SpeechToText`
         // played for P2a: `LlmTierPolicy` (Tier → Qwen `ModelDescriptor`) today; the
@@ -411,7 +412,13 @@ let package = Package(
         ),
         .testTarget(
             name: "DictationTests",
-            dependencies: ["Dictation", "AideCore", "SpeechToText", "DangerousCommandScanner"]
+            dependencies: [
+                "Dictation",
+                "AideCore",
+                "SpeechToText",
+                "DangerousCommandScanner",
+                "LLMRuntime",
+            ]
         ),
     ]
 )

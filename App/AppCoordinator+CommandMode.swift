@@ -18,7 +18,7 @@ extension AppCoordinator {
 
     /// Async composition root for Command Mode (plan Phase 2). Pre-renders the
     /// registry grammar and catalog, builds the mux, and injects it into
-    /// `VoiceSessionCoordinator`. Dictation uses `DictationDriver` (P5a Phase 2).
+    /// `VoiceSessionCoordinator`. Dictation uses `DictationDriver` (P5a Phase 3).
     func setUpCommandMode() async {
         let engine = WhisperSTTEngine(
             modelURL: AppCoordinator.modelsDirectory.blobURL(for: resolvedSttModelDescriptor))
@@ -31,7 +31,11 @@ extension AppCoordinator {
             capture: capture,
             preGate: preGate,
             inserter: inserter,
-            scanner: DangerousCommandScanner())
+            scanner: DangerousCommandScanner(),
+            llm: InferenceClient(),
+            resolveEndpoint: { [weak self] in
+                try await Self.resolveLiveSidecarEndpoint(from: self)
+            })
         let command = await makeCommandModeDriver(engine: engine, capture: capture, preGate: preGate)
         let mux = MuxVoiceSessionDriver(command: command, dictation: dictation)
 

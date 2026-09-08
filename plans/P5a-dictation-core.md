@@ -170,8 +170,8 @@ Files:
 - `Sources/Dictation/TonePreset.swift` — enum `asIs = "as_is"`, `professional`, `casual`, `concise`. `instruction: String` matches LLD §4.6 table (copy essence verbatim).
 - `Sources/Dictation/CleanupPromptBuilder.swift` — render LLD §6.3. Placeholders: `TONE_PRESET_INSTRUCTION`, `DICTIONARY_SUBSTITUTIONS` (from `dictionarySubstitutions()`; if empty, the "Apply these known corrections" block should read `none.` so the model isn't looking at a blank list), `RAW_TRANSCRIPT`.
 - `Sources/Dictation/CleanupResponseSanitizer.swift` — `static func sanitize(_ raw: String) -> String`. Trim; strip one layer of wrapping `"` or `""";` drop a prefix if it case-insensitively matches any of: `Here is the cleaned text:`, `Here's the cleaned text:`, `Cleaned text:`, `Sure,`, `Certainly,`. Do **not** invent an LLM "did it add facts" detector.
-- `DictationDriver`: after Pre-Gate pass (and after Phase 2 scan allows insert), if cleanup is enabled **and** endpoint available — Phase 3 assumes a `resolveEndpoint: @Sendable () async throws -> LLMEndpoint` **plus** `llm: any LLMClient`. If `resolveEndpoint` throws, **fail closed to raw insert** (Phase 4 will distinguish "not ready" copy). Temperature 0.2, stream false. Sanitize. Insert sanitized. If `chat` throws, insert raw and summary `"Inserted raw — cleanup failed."`.
-- Guard `endpoint.isLocal` before chat; if not local, insert raw (must never implicitly offload).
+- `DictationDriver`: after Pre-Gate pass (and after Phase 2 scan allows insert), Phase 3 assumes a `resolveEndpoint: @Sendable () async throws -> LLMEndpoint` **plus** `llm: any LLMClient`. Cleanup is **three-state**: `cleaned` / `skipped` / `chatFailed`. Handle **resolve separately from chat** — not one `catch` for both. If `resolveEndpoint` throws **or** `endpoint.isLocal` is false, **skip** cleanup and insert raw; Overlay summary is the inserted text (Phase 4 will distinguish "not ready" copy). Temperature 0.2, stream false. Sanitize. Insert sanitized. If `llm.chat` throws **or** stream iteration throws, insert raw and summary `"Inserted raw — cleanup failed."` (`DictationDriver.cleanupFailedSummary`).
+- Guard `endpoint.isLocal` before chat; if not local, insert raw (must never implicitly offload) — same **skip** path as resolve throw, not `chatFailed`.
 
 Add `LLMRuntime` to the `Dictation` target deps.
 
@@ -183,14 +183,15 @@ Add `LLMRuntime` to the `Dictation` target deps.
 - `CleanupResponseSanitizerTests.testStripsQuotedModelPreamble`
 - `CleanupResponseSanitizerTests.testLeavesCleanTextAlone`
 - `DictationDriverTests.testCleanupInsertsSanitizedText` — `MockLLMClient.setChatChunks(.success([ChatCompletionChunk(delta:"Cleaned.", isFinal:true)]))`; inserter sees `"Cleaned."`; `chatCallCount == 1`; `SamplingParams.temperature == 0.2` — assert via a recording LLM wrapper if `MockLLMClient` doesn't record params; **extend `MockLLMClient` in LLMRuntime** with `lastSamplingParams: SamplingParams?` (small, justified).
-- `DictationDriverTests.testCleanupFailureInsertsRaw`
+- `DictationDriverTests.testCleanupFailureInsertsRaw` — `llm.chat` throws; insert raw; Overlay summary exactly `Inserted raw — cleanup failed.`
+- `DictationDriverTests.testResolveEndpointFailureInsertsRaw` — `resolveEndpoint` throws; insert raw; Overlay summary is the transcript (skip, not chat-failed).
 - `DictationDriverTests.testNonLocalEndpointSkipsCleanup`
 
 ### Acceptance criteria
 
-- [ ] Named tests pass.
+- [x] Named tests pass.
 - [ ] Manual: with sidecar already warm, dictation in TextEdit inserts cleaned (filler dropped) text.
-- [ ] Per-phase gate green.
+- [x] Per-phase gate green.
 
 ---
 
