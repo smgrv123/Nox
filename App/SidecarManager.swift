@@ -30,10 +30,13 @@ extension SidecarLifecycleController {
     ///   - modelsDirectory: resolves a `ModelDescriptor` to an absolute blob path.
     ///     Real provisioning is Phase 5's job — Phase 2's manual verification hook
     ///     (`AppCoordinator+Sidecar.swift`) points this at a manually-placed dev GGUF.
-    ///   - tier: the confirmed model tier (Phase 6). On 8GB, the Sidecar idle-unloads
-    ///     after `idleUnloadThreshold`; on 16GB (or `nil`), it stays resident.
-    ///   - idleUnloadThreshold: seconds of inactivity before an 8GB-tier Sidecar
-    ///     idle-unloads (defaults to `IdleUnloadPolicy.defaultIdleThreshold`).
+    ///   - tier: the confirmed model tier (Phase 6). When set, the Sidecar idle-unloads
+    ///     after `idleUnloadThreshold` has elapsed with no activity; `nil` stays
+    ///     resident (backwards-compatible with pre-Phase-6 callers).
+    ///   - idleUnloadThreshold: seconds of inactivity before the Sidecar idle-unloads
+    ///     (defaults to `IdleUnloadPolicy.defaultIdleThreshold`, the 8GB production
+    ///     value; the 16GB call site passes `IdleUnloadPolicy.tier16IdleThreshold`
+    ///     explicitly — see `AppCoordinator+Sidecar.swift`'s `ensureSidecarManager(model:)`).
     ///   - onStateChange: optional transition observer (used to log timestamped
     ///     state changes during manual verification).
     init(

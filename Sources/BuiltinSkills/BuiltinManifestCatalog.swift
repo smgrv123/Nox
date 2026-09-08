@@ -163,7 +163,10 @@ public enum BuiltinManifestCatalog {
         parameters: objectSchema(
             required: [],
             properties: [
-                "region": stringEnum(["full", "window", "selection"], default: "full")
+                // Interactive modes ("window" via `-w`, "selection" via `-s`) block
+                // system-wide input indefinitely with no visual cue — unsafe for a
+                // voice-invoked skill. Full-screen capture is the only supported mode.
+                "region": stringEnum(["full"], default: "full")
             ]
         ),
         permissions: ManifestPermissions(requires: ["screen_recording"]),

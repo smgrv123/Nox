@@ -2,10 +2,14 @@ import SkillManifest
 
 /// Deterministic GBNF assembly from enabled manifests (LLD §2.2.2 / §4.4).
 ///
-/// Rule names are `s-` plus the skill `id` with underscores kept (not rewritten as
-/// hyphens). Manifest ids already match `^[a-z][a-z0-9_]{2,63}$`, so
-/// `s-open_application` is a valid GBNF identifier. The same input set always
-/// produces byte-identical output; alternatives are ordered by `id`.
+/// Rule names are `s-` plus the skill `id` with underscores rewritten as
+/// hyphens, since llama.cpp GBNF rule names allow only `[a-zA-Z0-9-]`.
+/// Manifest ids already match `^[a-z][a-z0-9_]{2,63}$` and never contain
+/// hyphens, so `open_application` becomes the valid identifier
+/// `s-open-application` with no collision risk. The `skill_id` JSON string
+/// literal emitted inside each rule body keeps the original underscored id
+/// unchanged. The same input set always produces byte-identical output;
+/// alternatives are ordered by `id`.
 ///
 /// `general_qa` and `screen_qa` are reserved router targets: they are always
 /// present in the skill union (PRD story 4). When a reserved id already has a
@@ -67,8 +71,9 @@ public enum GBNFGrammarAssembler {
     private static let nullRule =
         #"s-null ::= "\"skill_id\":" ws "null" "," ws "\"parameters\":" ws "{" ws "}""#
 
-    /// Underscores in the skill id are kept so `open_application` → `s-open_application`.
+    /// Underscores in the skill id are rewritten as hyphens so
+    /// `open_application` → `s-open-application`, a valid GBNF rule name.
     static func ruleName(_ id: String) -> String {
-        "s-\(id)"
+        "s-" + id.replacingOccurrences(of: "_", with: "-")
     }
 }

@@ -140,7 +140,7 @@ final class BuiltinManifestCatalogTests: XCTestCase {
         )
         XCTAssertEqual(
             enumValues(of: byID["take_screenshot"]!, property: "region"),
-            ["full", "window", "selection"]
+            ["full"]
         )
     }
 }

@@ -19,12 +19,12 @@ final class GBNFGrammarAssemblerTests: XCTestCase {
             "root must emit intent first, then the skill alternative. Grammar:\n\(grammar)"
         )
         XCTAssertTrue(
-            grammar.contains("skill ::= s-general_qa | s-open_application | s-screen_qa | s-set_timer | s-null"),
+            grammar.contains("skill ::= s-general-qa | s-open-application | s-screen-qa | s-set-timer | s-null"),
             "skill alternatives must be a discriminated union sorted by id, with s-null last. Grammar:\n\(grammar)"
         )
         XCTAssertTrue(
             grammar.contains(
-                #"s-open_application ::= "\"skill_id\":" ws "\"open_application\"" "," ws "#
+                #"s-open-application ::= "\"skill_id\":" ws "\"open_application\"" "," ws "#
                     + #""\"parameters\":" ws "{" ws "\"app_name\":" ws string ws "}""#
             ),
             "open_application alternative must pin the skill_id literal. Grammar:\n\(grammar)"
@@ -44,12 +44,12 @@ final class GBNFGrammarAssemblerTests: XCTestCase {
 
         let grammar = await registry.routerGrammar()
 
-        XCTAssertTrue(grammar.contains("s-general_qa"), "grammar:\n\(grammar)")
-        XCTAssertTrue(grammar.contains("s-screen_qa"), "grammar:\n\(grammar)")
+        XCTAssertTrue(grammar.contains("s-general-qa"), "grammar:\n\(grammar)")
+        XCTAssertTrue(grammar.contains("s-screen-qa"), "grammar:\n\(grammar)")
         XCTAssertTrue(grammar.contains(#""\"skill_id\":" ws "\"general_qa\""#), "grammar:\n\(grammar)")
         XCTAssertTrue(grammar.contains(#""\"skill_id\":" ws "\"screen_qa\""#), "grammar:\n\(grammar)")
         XCTAssertTrue(
-            grammar.contains("skill ::= s-general_qa | s-open_application | s-screen_qa | s-null"),
+            grammar.contains("skill ::= s-general-qa | s-open-application | s-screen-qa | s-null"),
             "reserved targets are ordinary manifests, ordered by id. Grammar:\n\(grammar)"
         )
     }
@@ -66,7 +66,7 @@ final class GBNFGrammarAssemblerTests: XCTestCase {
 
         XCTAssertEqual(grammarA, grammarB)
         XCTAssertTrue(
-            grammarA.contains("skill ::= s-general_qa | s-open_application | s-screen_qa | s-set_timer | s-null")
+            grammarA.contains("skill ::= s-general-qa | s-open-application | s-screen-qa | s-set-timer | s-null")
         )
     }
 
@@ -79,11 +79,11 @@ final class GBNFGrammarAssemblerTests: XCTestCase {
 
         let grammar = await registry.routerGrammar()
 
-        XCTAssertTrue(grammar.contains("s-open_application"))
-        XCTAssertFalse(grammar.contains("s-set_timer"))
+        XCTAssertTrue(grammar.contains("s-open-application"))
+        XCTAssertFalse(grammar.contains("s-set-timer"))
         XCTAssertFalse(grammar.contains("s-BAD"))
         XCTAssertTrue(
-            grammar.contains("skill ::= s-general_qa | s-open_application | s-screen_qa | s-null")
+            grammar.contains("skill ::= s-general-qa | s-open-application | s-screen-qa | s-null")
         )
     }
 
@@ -177,24 +177,24 @@ final class GBNFGrammarAssemblerTests: XCTestCase {
         let grammar = await registry.routerGrammar()
 
         XCTAssertTrue(
-            grammar.contains("skill ::= s-general_qa | s-open_application | s-screen_qa | s-null"),
+            grammar.contains("skill ::= s-general-qa | s-open-application | s-screen-qa | s-null"),
             "reserved general_qa and screen_qa must always be present, sorted by id, s-null last. Grammar:\n\(grammar)"
         )
         XCTAssertTrue(
             grammar.contains(
-                #"s-general_qa ::= "\"skill_id\":" ws "\"general_qa\"" "," ws "\"parameters\":" ws "{" ws "\"question\":" ws string ws "}""#
+                #"s-general-qa ::= "\"skill_id\":" ws "\"general_qa\"" "," ws "\"parameters\":" ws "{" ws "\"question\":" ws string ws "}""#
             ),
             "unregistered general_qa must use LLD §2.2.2 question:string shape. Grammar:\n\(grammar)"
         )
         XCTAssertTrue(
             grammar.contains(
-                #"s-screen_qa ::= "\"skill_id\":" ws "\"screen_qa\"" "," ws "\"parameters\":" ws "{" ws "\"question\":" ws string ws "}""#
+                #"s-screen-qa ::= "\"skill_id\":" ws "\"screen_qa\"" "," ws "\"parameters\":" ws "{" ws "\"question\":" ws string ws "}""#
             ),
             "unregistered screen_qa must use LLD §2.2.2 question:string shape. Grammar:\n\(grammar)"
         )
         XCTAssertTrue(
             grammar.contains(
-                #"s-open_application ::= "\"skill_id\":" ws "\"open_application\"" "," ws "#
+                #"s-open-application ::= "\"skill_id\":" ws "\"open_application\"" "," ws "#
                     + #""\"parameters\":" ws "{" ws "\"app_name\":" ws string ws "}""#
             ),
             "registered open_application must keep its own parameters. Grammar:\n\(grammar)"
@@ -216,7 +216,7 @@ final class GBNFGrammarAssemblerTests: XCTestCase {
 
         XCTAssertTrue(
             grammar.contains(
-                #"s-current_time ::= "\"skill_id\":" ws "\"current_time\"" "," ws "\"parameters\":" ws "{" ws "}""#),
+                #"s-current-time ::= "\"skill_id\":" ws "\"current_time\"" "," ws "\"parameters\":" ws "{" ws "}""#),
             "empty properties must compile to an empty JSON object. Grammar:\n\(grammar)"
         )
     }

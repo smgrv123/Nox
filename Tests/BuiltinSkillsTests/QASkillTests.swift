@@ -10,7 +10,7 @@ final class QASkillTests: XCTestCase {
             skillID: "general_qa",
             parameters: objectParams(["question": .string("who wrote Hamlet")])
         )
-        XCTAssertEqual(result.summary, "General Q&A is not yet available")
+        XCTAssertEqual(result.summary, "I can't answer general questions yet — that's coming in a future update.")
     }
 
     func testScreenQAStubReturnsNotYetAvailable() async throws {
@@ -18,6 +18,7 @@ final class QASkillTests: XCTestCase {
             skillID: "screen_qa",
             parameters: objectParams(["question": .string("what's on my screen")])
         )
-        XCTAssertEqual(result.summary, "Screen Q&A is not yet available")
+        XCTAssertEqual(
+            result.summary, "I can't answer questions about your screen yet — that's coming in a future update.")
     }
 }

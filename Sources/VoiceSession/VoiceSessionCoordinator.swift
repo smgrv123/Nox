@@ -71,6 +71,14 @@ public final class VoiceSessionCoordinator {
     /// fire it deterministically instead of waiting on a real timer.
     private let scheduleAutoHide: (@escaping () -> Void) -> Void
 
+    /// Schedules a safety-net timeout for Confirm-Back: if the user never taps
+    /// Approve/Reject, this fires the same cleanup `rejectConfirmBack()` does so the
+    /// Overlay doesn't stay on screen forever and `beginSession`'s `emit(.activate)`
+    /// guard (which only succeeds from `.hidden`) doesn't leave both hotkeys dead
+    /// until relaunch. No-op default so existing call sites that don't pass one keep
+    /// their current behavior (no timeout fires).
+    private let scheduleConfirmBackTimeout: (@escaping () -> Void) -> Void
+
     /// Mirrors `transcript`/`result` out to the App layer (`OverlayController.present`)
     /// as they change, since a transcript update has no corresponding `OverlayEvent`
     /// for the caller to key off of.
@@ -91,6 +99,17 @@ public final class VoiceSessionCoordinator {
     /// there is a prior session to `cancel()`.
     private var sessionInFlight = false
 
+    /// Guards the Confirm-Back safety-net timeout against firing after a real
+    /// Approve/Reject already resolved the decision. Checking `emit(.dismiss)`'s
+    /// return value alone is not enough for this: `.dismiss` is *also* a legal edge
+    /// from `.showingResult` (the normal post-Approve result auto-hide uses exactly
+    /// that transition), so after an Approve a stale timeout's `emit(.dismiss)` would
+    /// still succeed and wrongly fire `driver.reject()` on an already-dispatched
+    /// session. This flag is the actual "is there still an unanswered Confirm-Back"
+    /// check; `scheduleConfirmBackTimeoutToIdle`'s `emit(.dismiss)` guard stays as a
+    /// second line of defense.
+    private var awaitingConfirmBackResponse = false
+
     /// The latest transcript, for rendering. `nil` before any session has produced one.
     public private(set) var transcript: String?
 
@@ -104,7 +123,8 @@ public final class VoiceSessionCoordinator {
         scheduleAutoHide: @escaping (@escaping () -> Void) -> Void,
         presentText: @escaping (String?, VoiceSessionResult?) -> Void = { _, _ in },
         playProcessingCue: @escaping () -> Void = {},
-        reportStatus: @escaping (VoiceSessionPhase) -> Void = { _ in }
+        reportStatus: @escaping (VoiceSessionPhase) -> Void = { _ in },
+        scheduleConfirmBackTimeout: @escaping (@escaping () -> Void) -> Void = { _ in }
     ) {
         self.driver = driver
         self.emit = emit
@@ -113,6 +133,7 @@ public final class VoiceSessionCoordinator {
         self.presentText = presentText
         self.playProcessingCue = playProcessingCue
         self.reportStatus = reportStatus
+        self.scheduleConfirmBackTimeout = scheduleConfirmBackTimeout
         driver.onUpdate = { [weak self] update in self?.apply(update) }
     }
 
@@ -158,6 +179,8 @@ public final class VoiceSessionCoordinator {
                 transcript: info.transcript,
                 result: VoiceSessionResult(transcript: info.transcript, summary: info.intent))
             _ = emit(.presentConfirmBack)
+            awaitingConfirmBackResponse = true
+            scheduleConfirmBackTimeoutToIdle()
         case .promptBack(let transcript, let suggestion):
             sessionInFlight = false
             let summary = suggestion ?? "Did you mean…?"
@@ -177,7 +200,9 @@ public final class VoiceSessionCoordinator {
     }
 
     /// Auto-hide after a terminal Overlay presentation (result / prompt-back /
-    /// hard-blocked). Confirm-Back stays up until Approve or Reject.
+    /// hard-blocked). Confirm-Back has no auto-hide here — it stays up until Approve
+    /// or Reject, but does get its own safety-net timeout (see
+    /// `scheduleConfirmBackTimeoutToIdle`) so it can't hang the Overlay forever.
     private func scheduleDismissToIdle() {
         scheduleAutoHide { [weak self] in
             guard let self, self.emit(.dismiss) else { return }
@@ -185,15 +210,33 @@ public final class VoiceSessionCoordinator {
         }
     }
 
+    /// Safety net for Confirm-Back: if the user never taps Approve/Reject, this fires
+    /// and tears the session down the same way `rejectConfirmBack()` does. Guarded on
+    /// `emit(.dismiss)` succeeding, which naturally no-ops if the user already
+    /// approved/rejected before the timeout fired — the Overlay is no longer
+    /// `.confirmBack` by then, so the state machine refuses the transition.
+    private func scheduleConfirmBackTimeoutToIdle() {
+        scheduleConfirmBackTimeout { [weak self] in
+            guard let self, self.awaitingConfirmBackResponse else { return }
+            self.awaitingConfirmBackResponse = false
+            guard self.emit(.dismiss) else { return }
+            self.driver.reject()
+            self.sessionInFlight = false
+            self.reportStatus(.idle)
+        }
+    }
+
     /// Overlay Approve — Confirm-Back → ShowingResult, then re-dispatch.
     public func approveConfirmBack() {
         guard emit(.approve) else { return }
+        awaitingConfirmBackResponse = false
         driver.approve()
     }
 
     /// Overlay Reject — dismiss Confirm-Back without running the command.
     public func rejectConfirmBack() {
         _ = emit(.reject)
+        awaitingConfirmBackResponse = false
         driver.reject()
         sessionInFlight = false
         reportStatus(.idle)

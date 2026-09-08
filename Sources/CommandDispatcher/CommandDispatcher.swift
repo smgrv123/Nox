@@ -146,9 +146,11 @@ public struct CommandDispatcher: Dispatching, Sendable {
     private static func qaStub(for skillID: String) -> SkillResult? {
         switch skillID {
         case "general_qa":
-            return SkillResult(summary: "General Q&A is not yet available")
+            return SkillResult(
+                summary: "I can't answer general questions yet — that's coming in a future update.")
         case "screen_qa":
-            return SkillResult(summary: "Screen Q&A is not yet available")
+            return SkillResult(
+                summary: "I can't answer questions about your screen yet — that's coming in a future update.")
         default:
             return nil
         }

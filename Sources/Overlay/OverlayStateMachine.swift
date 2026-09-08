@@ -55,6 +55,8 @@ public struct OverlayStateMachine: Sendable, Equatable {
         Edge(from: .confirmBack, event: .approve): .showingResult,
         // ConfirmBack --rejected--> Hidden
         Edge(from: .confirmBack, event: .reject): .hidden,
+        // ConfirmBack --dismiss / timeout (unanswered)--> Hidden
+        Edge(from: .confirmBack, event: .dismiss): .hidden,
     ]
 
     /// The destination for a *legal* `(state, event)` pair, or `nil` when the

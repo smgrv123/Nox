@@ -36,12 +36,15 @@ import Persistence
 /// two actually ran a given launch (in practice mutually exclusive: the dev hook only
 /// fires when a developer explicitly sets `AIDE_RUN_SIDECAR_CHECK=1`).
 ///
-/// **P2b Phase 6** adds idle-unload wiring (LLD §5.4): on 8GB tier, the Sidecar's
+/// **P2b Phase 6** adds idle-unload wiring (LLD §5.4): the Sidecar's
 /// `SidecarLifecycleController` evaluates `IdleUnloadPolicy` on each ready-poll tick
 /// and stops itself once the idle threshold is exceeded. `noteLLMActivity()` resets
 /// the idle timer and, if the Sidecar was idle-unloaded, restarts it — the normal
-/// `.launching` → `.ready` flow produces a brief visible loading state. 16GB tier
-/// never idle-unloads (the `Tier` is passed at construction time).
+/// `.launching` → `.ready` flow produces a brief visible loading state. Both tiers now
+/// idle-unload: 16GB after `IdleUnloadPolicy.tier16IdleThreshold` (3min, since the
+/// resident Qwen3-8B costs ~4.7GB of RAM held indefinitely otherwise), 8GB after
+/// `IdleUnloadPolicy.defaultIdleThreshold` (5min, unchanged) — the tier-appropriate
+/// threshold is resolved and passed explicitly in `ensureSidecarManager(model:)` below.
 ///
 extension AppCoordinator {
 
@@ -89,40 +92,30 @@ extension AppCoordinator {
     /// already launching/ready), so calling this again on a Retry-after-failure is safe.
     ///
     /// **Phase 6 (LLD §5.4):** the `Tier` is passed to `SidecarManager` at construction
-    /// time. On 8GB, `SidecarLifecycleController` evaluates `IdleUnloadPolicy` on each
-    /// ready-poll tick and stops the process when the idle threshold is exceeded. On
-    /// 16GB, the policy always returns `.resident` — no unload. The idle timer resets
-    /// via `recordActivity()` (called by `noteLLMActivity()` and `startIfNeeded`).
-    func startProductionSidecar(model: ModelDescriptor) {
-        productionSidecarModel = model
+    /// time. `SidecarLifecycleController` evaluates `IdleUnloadPolicy` on each
+    /// ready-poll tick and stops the process when the tier-appropriate idle threshold
+    /// is exceeded — 16GB at 3 minutes, 8GB at 5 minutes (see
+    /// `ensureSidecarManager(model:)`'s doc comment). The idle timer resets via
+    /// `recordActivity()` (called by `noteLLMActivity()` and `startIfNeeded`).
+    /// Subsequent launches skip onboarding, so Qwen provisioning never runs and the
+    /// Sidecar would stay down — Command Mode then cannot route. If the provisioned
+    /// blob is on disk, bring llama-server up (integrity was checked at download).
+    func startSidecarIfModelReady() {
+        let descriptor = resolvedLlmModelDescriptor
+        let blobURL = AppCoordinator.modelsDirectory.blobURL(for: descriptor)
+        guard FileManager.default.fileExists(atPath: blobURL.path) else { return }
+        startProductionSidecar(model: descriptor)
+    }
 
-        let manager: SidecarManager
-        if let existing = sidecarManagerInstance {
-            manager = existing
-        } else {
-            guard let logFileURL = storage?.sidecarLogFile,
-                let binaryDirectory = Bundle.main.resourceURL?.appending(
-                    path: "llama-server", directoryHint: .isDirectory)
-            else {
-                appLog?.log(
-                    "LLM Sidecar not started — storage or the bundled llama-server resource is unavailable.",
-                    level: .error)
-                return
-            }
-            let appLog = self.appLog
-            let tierOverride = settings.modelTier.flatMap(Tier.init(rawValue:))
-            let resolvedTier =
-                tierOverride
-                ?? TierPolicy.tier(physicalMemoryBytes: ProcessInfo.processInfo.physicalMemory)
-            manager = SidecarManager(
-                binaryDirectory: binaryDirectory,
-                logFileURL: logFileURL,
-                modelsDirectory: AppCoordinator.modelsDirectory,
-                tier: resolvedTier,
-                onStateChange: { state in
-                    appLog?.log("LLM Sidecar: state -> \(state)", level: .notice)
-                })
-            sidecarManagerInstance = manager
+    func startProductionSidecar(model: ModelDescriptor) {
+        // `startProductionSidecar` itself is nonisolated (unchanged signature — see
+        // `ensureSidecarManager(model:)`'s doc comment for why) so it can keep being
+        // called synchronously from both of its guaranteed-main-thread callers:
+        // `applicationDidFinishLaunching()` (an `NSApplicationDelegate` hook, always
+        // main-thread per AppKit) and `handleLlmProvisioning` (`@MainActor`).
+        // `assumeIsolated` asserts that invariant rather than silently trusting it.
+        guard let manager = MainActor.assumeIsolated({ ensureSidecarManager(model: model) }) else {
+            return
         }
 
         let appLog = self.appLog
@@ -135,18 +128,93 @@ extension AppCoordinator {
         }
     }
 
+    /// The single convergence point for `sidecarManagerInstance`: reuse the existing
+    /// manager if one has already been constructed, or build+assign one. `@MainActor`
+    /// so concurrent callers always observe or construct exactly *one* `SidecarManager`
+    /// — the main-thread launch path (`startProductionSidecar`, above) and
+    /// `resolveLiveSidecarEndpoint` (`AppCoordinator+CommandMode.swift`), which runs on
+    /// the command router's own cooperative thread pool, not the main actor — instead
+    /// of racing to each spawn their own `llama-server` (on a 16GB machine, each
+    /// mmapping the full model: swap-thrashing territory).
+    ///
+    /// `SidecarLifecycleController.startIfNeeded` is already idempotent once callers
+    /// share an instance (`guard lifecycleTask == nil`), so this only needs to fix
+    /// *which* instance gets built and assigned — not re-implement that idempotency.
+    @MainActor
+    func ensureSidecarManager(model: ModelDescriptor) -> SidecarManager? {
+        productionSidecarModel = model
+        if let existing = sidecarManagerInstance {
+            return existing
+        }
+        guard let logFileURL = storage?.sidecarLogFile,
+            let binaryDirectory = Bundle.main.resourceURL?.appending(
+                path: "llama-server", directoryHint: .isDirectory)
+        else {
+            appLog?.log(
+                "LLM Sidecar not started — storage or the bundled llama-server resource is unavailable.",
+                level: .error)
+            return nil
+        }
+        let appLog = self.appLog
+        let tierOverride = settings.modelTier.flatMap(Tier.init(rawValue:))
+        let resolvedTier =
+            tierOverride
+            ?? TierPolicy.tier(physicalMemoryBytes: ProcessInfo.processInfo.physicalMemory)
+        // 16GB gets its own, shorter idle-unload threshold (Phase 6 policy update: the
+        // resident Qwen3-8B costs ~4.7GB of RAM held indefinitely otherwise); 8GB keeps
+        // `IdleUnloadPolicy.defaultIdleThreshold` (5min, unchanged).
+        let idleUnloadThreshold: TimeInterval =
+            resolvedTier == .tier16GB
+            ? IdleUnloadPolicy.tier16IdleThreshold
+            : IdleUnloadPolicy.defaultIdleThreshold
+        let manager = SidecarManager(
+            binaryDirectory: binaryDirectory,
+            logFileURL: logFileURL,
+            modelsDirectory: AppCoordinator.modelsDirectory,
+            tier: resolvedTier,
+            idleUnloadThreshold: idleUnloadThreshold,
+            onStateChange: { state in
+                appLog?.log("LLM Sidecar: state -> \(state)", level: .notice)
+            })
+        sidecarManagerInstance = manager
+        return manager
+    }
+
+    /// `ensureSidecarManager(model:)`'s counterpart for Command Mode's router: resolves
+    /// the Qwen descriptor, reuses `sidecarManagerInstance` if already built, or
+    /// constructs one — gated on the model actually being provisioned on disk, exactly
+    /// mirroring `startSidecarIfModelReady()`'s guard above — if not. `@MainActor` for
+    /// the same reason as `ensureSidecarManager(model:)`: `resolveLiveSidecarEndpoint`
+    /// calls this from the router's cooperative thread pool, never the main thread.
+    @MainActor
+    func ensureSidecarManagerIfModelProvisioned() -> (manager: SidecarManager, model: ModelDescriptor)? {
+        let descriptor = resolvedLlmModelDescriptor
+        if let existing = sidecarManagerInstance {
+            return (existing, descriptor)
+        }
+        let blobURL = AppCoordinator.modelsDirectory.blobURL(for: descriptor)
+        guard FileManager.default.fileExists(atPath: blobURL.path) else { return nil }
+        guard let manager = ensureSidecarManager(model: descriptor) else { return nil }
+        return (manager, descriptor)
+    }
+
     /// Record an LLM request, resetting the idle-unload countdown (Phase 6; LLD §5.4).
     /// If the Sidecar was idle-unloaded (`.stopped`), restarts it — the normal
     /// `.launching` → `.ready` flow produces a brief visible loading state. Future LLM
-    /// consumers (P4/P5/P6) call this before every request.
+    /// consumers (P4/P5/P6) call this before every request. Its only caller
+    /// (`resolveLiveSidecarEndpoint`) runs off the main actor, so both
+    /// `sidecarManagerInstance` and `productionSidecarModel` reads are hopped onto the
+    /// main actor rather than read directly from that thread.
     func noteLLMActivity() {
-        guard let manager = sidecarManagerInstance else { return }
-        let model = productionSidecarModel
-        let appLog = self.appLog
         Task {
+            guard let manager = await MainActor.run(body: { self.sidecarManagerInstance }) else {
+                return
+            }
+            let appLog = self.appLog
             await manager.recordActivity()
             let state = await manager.state
-            guard case .stopped = state, let model else { return }
+            guard case .stopped = state else { return }
+            guard let model = await MainActor.run(body: { self.productionSidecarModel }) else { return }
             appLog?.log("Idle-unload: reloading Sidecar on new LLM request.", level: .notice)
             do {
                 try await manager.startIfNeeded(model: model)

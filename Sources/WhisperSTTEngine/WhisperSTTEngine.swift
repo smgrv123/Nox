@@ -39,6 +39,17 @@ public actor WhisperSTTEngine: STTEngine {
     /// The warm `whisper_context *`; `nil` until `ensureLoaded()` runs.
     private var context: OpaquePointer?
 
+    /// `n_threads` reserves this fraction of `activeProcessorCount` for the rest of the
+    /// system instead of the previous flat "all cores but one" (which let a single voice
+    /// command saturate every core and starve WindowServer). A quarter of the cores
+    /// scales with the machine rather than pinning a magic constant, and leaves room for
+    /// `LlamaServerProcessSource`'s own thread pool — a voice command's STT and LLM
+    /// stages can run concurrently, so whisper alone must not claim every free core.
+    private static let systemHeadroomDivisor = 4
+    /// Floor on the reservation above, so even a small (e.g. 4-core) Mac keeps slack
+    /// for the system rather than rounding the divisor down to zero.
+    private static let minimumSystemHeadroom = 2
+
     public init(modelURL: URL) {
         self.modelURL = modelURL
     }
@@ -95,7 +106,9 @@ public actor WhisperSTTEngine: STTEngine {
         params.translate = false
         params.no_timestamps = false
         params.single_segment = false
-        params.n_threads = Int32(max(1, ProcessInfo.processInfo.activeProcessorCount - 1))
+        let cores = ProcessInfo.processInfo.activeProcessorCount
+        let headroom = max(Self.minimumSystemHeadroom, cores / Self.systemHeadroomDivisor)
+        params.n_threads = Int32(max(1, cores - headroom))
 
         // Language is forced to English — whisper.cpp's auto-detection on
         // multilingual models (including large-v3-turbo) consumes the audio during

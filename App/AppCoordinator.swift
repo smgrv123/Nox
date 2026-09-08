@@ -74,7 +74,12 @@ final class AppCoordinator: ObservableObject {
 
     /// The shared `SidecarManager` handle — used by both the dev-check hook and the
     /// production path (`startProductionSidecar`); teardown reads it via
-    /// `applicationShouldTerminate`.
+    /// `applicationShouldTerminate`. Main-actor-only-by-convention like the rest of
+    /// this file's state: the production path is only ever constructed/read through
+    /// `AppCoordinator+Sidecar.swift`'s `@MainActor` `ensureSidecarManager(model:)` /
+    /// `ensureSidecarManagerIfModelProvisioned()`, the single convergence point that
+    /// keeps the main-thread launch path and Command Mode's router (which resolves the
+    /// Sidecar endpoint off the main actor) from racing to construct two instances.
     var sidecarManagerInstance: SidecarManager?
 
     /// The model the production Sidecar was last started with — used to restart it
@@ -88,6 +93,13 @@ final class AppCoordinator: ObservableObject {
 
     /// How long `.showingResult` stays on screen before Phase 6's loop auto-hides it.
     static let resultDisplayDuration: TimeInterval = 2.5
+
+    /// How long Confirm-Back stays on screen before the safety-net timeout rejects it
+    /// automatically (PHASE 11; docs/04-hld.md §13.1). Deliberately much longer than
+    /// `resultDisplayDuration`: Confirm-Back asks the user to make an active decision
+    /// (Approve/Reject a dangerous command) rather than just read a passing result, so
+    /// it needs enough time to actually notice and respond before this net kicks in.
+    static let confirmBackTimeoutDuration: TimeInterval = 20
 
     private let logger = Logger(subsystem: Build.bundleIdentifier, category: "Lifecycle")
 
@@ -159,6 +171,7 @@ final class AppCoordinator: ObservableObject {
         guard !isDuplicateInstance else { return }
         setUpStorage()
         installSleepWakeObserver()
+        startSidecarIfModelReady()
         Task { @MainActor in
             await self.setUpCommandMode()
             self.startHotkeys()

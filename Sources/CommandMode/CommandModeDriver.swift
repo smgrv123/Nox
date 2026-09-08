@@ -27,6 +27,7 @@ public final class CommandModeDriver: VoiceSessionDriver {
     let dispatcher: any Dispatching
     let registry: any SkillRegistering
     let logger: CalibrationLogger
+    let appCatalog: any InstalledApplicationCatalog
     let resolveEndpoint: @Sendable () async throws -> LLMEndpoint
 
     var generation = 0
@@ -58,6 +59,7 @@ public final class CommandModeDriver: VoiceSessionDriver {
         dispatcher: any Dispatching,
         registry: any SkillRegistering,
         logger: CalibrationLogger,
+        appCatalog: any InstalledApplicationCatalog = EmptyInstalledApplicationCatalog(),
         resolveEndpoint: @escaping @Sendable () async throws -> LLMEndpoint
     ) {
         self.engine = engine
@@ -67,6 +69,7 @@ public final class CommandModeDriver: VoiceSessionDriver {
         self.dispatcher = dispatcher
         self.registry = registry
         self.logger = logger
+        self.appCatalog = appCatalog
         self.resolveEndpoint = resolveEndpoint
     }
 
@@ -79,6 +82,7 @@ public final class CommandModeDriver: VoiceSessionDriver {
         dispatcher: any Dispatching,
         registry: any SkillRegistering,
         logger: CalibrationLogger,
+        appCatalog: any InstalledApplicationCatalog = EmptyInstalledApplicationCatalog(),
         endpoint: LLMEndpoint
     ) {
         self.init(
@@ -89,6 +93,7 @@ public final class CommandModeDriver: VoiceSessionDriver {
             dispatcher: dispatcher,
             registry: registry,
             logger: logger,
+            appCatalog: appCatalog,
             resolveEndpoint: { endpoint }
         )
     }
@@ -193,4 +198,11 @@ public final class CommandModeDriver: VoiceSessionDriver {
     static func degraded(_ summary: String) -> VoiceSessionResult {
         VoiceSessionResult(transcript: "", summary: summary)
     }
+}
+
+/// Default `appCatalog` conformer for callers that don't bias transcription toward
+/// installed-app names (e.g. existing test helpers). Always empty.
+public struct EmptyInstalledApplicationCatalog: InstalledApplicationCatalog {
+    public init() {}
+    public func installedApplications() async -> [InstalledApplication] { [] }
 }

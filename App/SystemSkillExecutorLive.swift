@@ -1,3 +1,4 @@
+import AideCore
 import AppKit
 import BuiltinSkills
 import Foundation
@@ -6,12 +7,15 @@ import UserNotifications
 /// Production `SystemSkillExecutor`: real AppKit / UserNotifications / HID / screencapture.
 struct SystemSkillExecutorLive: SystemSkillExecutor {
 
+    let catalog: any InstalledApplicationCatalog
+
     func openApplication(appName: String) async throws {
-        if let running = await MainActor.run(body: { Self.runningApplication(named: appName) }) {
+        let resolved = await Self.resolve(appName, catalog: catalog)
+        if let running = await MainActor.run(body: { Self.runningApplication(named: resolved.name) }) {
             await MainActor.run { running.activate() }
             return
         }
-        guard let url = Self.applicationURL(named: appName) else {
+        guard let url = resolved.bundleURL ?? Self.applicationURL(named: resolved.name) else {
             throw SystemSkillExecutorError.appNotFound(appName)
         }
         let configuration = NSWorkspace.OpenConfiguration()
@@ -20,8 +24,9 @@ struct SystemSkillExecutorLive: SystemSkillExecutor {
     }
 
     func quitApplication(appName: String) async throws {
+        let resolved = await Self.resolve(appName, catalog: catalog)
         try await MainActor.run {
-            guard let running = Self.runningApplication(named: appName) else {
+            guard let running = Self.runningApplication(named: resolved.name) else {
                 throw SystemSkillExecutorError.appNotRunning(appName)
             }
             guard running.terminate() else {
@@ -63,6 +68,67 @@ struct SystemSkillExecutorLive: SystemSkillExecutor {
     }
 
     // MARK: - Apps
+
+    /// A spoken app name resolved against the real installed-app catalog.
+    /// `bundleURL` is `nil` only when resolution fell all the way through to
+    /// the last-resort case — callers fall back to `applicationURL(named:)`.
+    private struct ResolvedApp {
+        let name: String
+        let bundleURL: URL?
+    }
+
+    /// Small, hand-picked nicknames whose real app name has no textual
+    /// relationship to what people say ("vscode" → "Visual Studio Code",
+    /// "call" → "Phone"). This is known-gap coverage, not a general
+    /// solution — the substring-fuzzy match against the real installed-app
+    /// catalog (case (c) below) is what covers the general "unlisted
+    /// nickname" case. Keep this table small; extend it only for names with
+    /// genuinely no textual relationship to the target app.
+    private static let aliasTable: [String: String] = [
+        "vscode": "Visual Studio Code",
+        "vs code": "Visual Studio Code",
+        "call": "Phone",
+        "phone call": "Phone",
+        "make a call": "Phone",
+        "facetime": "FaceTime",
+        "chrome": "Google Chrome",
+        "terminal": "Terminal",
+    ]
+
+    private static func normalize(_ name: String) -> String {
+        name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Resolves a spoken app name to a real installed app, in order:
+    /// (a) exact case-insensitive match against real bundle display names,
+    /// (b) alias-table lookup, re-matched against the real catalog,
+    /// (c) substring/normalized-fuzzy match against the real catalog,
+    /// (d) last resort: leave `appName` unchanged for the old flat-root check.
+    private static func resolve(
+        _ appName: String, catalog: any InstalledApplicationCatalog
+    ) async -> ResolvedApp {
+        let installed = await catalog.installedApplications()
+
+        if let match = installed.first(where: { namesMatch(appName, $0.displayName) }) {
+            return ResolvedApp(name: match.displayName, bundleURL: match.bundleURL)
+        }
+
+        if let aliasTarget = aliasTable[normalize(appName)],
+            let match = installed.first(where: { namesMatch(aliasTarget, $0.displayName) }) {
+            return ResolvedApp(name: match.displayName, bundleURL: match.bundleURL)
+        }
+
+        let normalizedQuery = normalize(appName)
+        if let match = installed.first(where: {
+            let normalizedCandidate = normalize($0.displayName)
+            return normalizedCandidate.contains(normalizedQuery)
+                || normalizedQuery.contains(normalizedCandidate)
+        }) {
+            return ResolvedApp(name: match.displayName, bundleURL: match.bundleURL)
+        }
+
+        return ResolvedApp(name: appName, bundleURL: nil)
+    }
 
     private static func runningApplication(named appName: String) -> NSRunningApplication? {
         NSWorkspace.shared.runningApplications.first { app in
@@ -159,16 +225,11 @@ struct SystemSkillExecutorLive: SystemSkillExecutor {
     }
 
     private static func runScreencapture(region: String?, path: String) throws {
-        var arguments = ["-x"]
-        switch region {
-        case "window":
-            arguments.append("-w")
-        case "selection":
-            arguments.append("-s")
-        default:
-            break
-        }
-        arguments.append(path)
+        // Only full-screen capture is supported. `-w` (window) and `-s` (selection)
+        // block system-wide mouse/keyboard input indefinitely with no visual cue,
+        // which is unsafe for a voice-invoked skill with no visual context. `region`
+        // is accepted for protocol compatibility but otherwise ignored.
+        let arguments = ["-x", path]
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
         process.arguments = arguments

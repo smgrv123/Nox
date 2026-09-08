@@ -172,6 +172,39 @@ actor ThrowingSTTEngine: STTEngine {
     }
 }
 
+/// Canned `InstalledApplicationCatalog` for the bias-prompt test — a fixed app list,
+/// no filesystem enumeration.
+struct FakeInstalledApplicationCatalog: InstalledApplicationCatalog {
+    let apps: [InstalledApplication]
+
+    func installedApplications() async -> [InstalledApplication] {
+        apps
+    }
+}
+
+/// Records the `initialPrompt` passed to `transcribe`, in addition to returning a
+/// canned `Transcription`. Local to this test target — does not touch the shared
+/// `MockSTTEngine` used across other test targets.
+actor RecordingSTTEngine: STTEngine {
+    private let stub: Transcription
+    private(set) var lastInitialPrompt: String?
+
+    init(returning transcription: Transcription) {
+        self.stub = transcription
+    }
+
+    func ensureLoaded() async throws {}
+
+    func transcribe(
+        _ pcm: PCMBuffer,
+        language: LanguageHint,
+        initialPrompt: String?
+    ) async throws -> Transcription {
+        lastInitialPrompt = initialPrompt
+        return stub
+    }
+}
+
 // MARK: - Pipeline factory (CommandModeDriverTests)
 
 let commandModePCM = PCMBuffer(
@@ -215,7 +248,8 @@ func makeDriver(
     logFileURL: URL? = nil,
     engine: (any STTEngine)? = nil,
     capture: FakeCaptureBuffer? = nil,
-    router: (any Routing)? = nil
+    router: (any Routing)? = nil,
+    appCatalog: (any InstalledApplicationCatalog)? = nil
 ) async throws -> CommandModeDriver {
     let valueRange = try utf8Range(of: route.skillLiteral, in: route.raw)
     let completion = RouterCompletion(
@@ -249,6 +283,7 @@ func makeDriver(
         dispatcher: dispatcher,
         registry: registry,
         logger: CalibrationLogger(fileURL: logURL),
+        appCatalog: appCatalog ?? EmptyInstalledApplicationCatalog(),
         endpoint: commandModeLocalEndpoint
     )
 }

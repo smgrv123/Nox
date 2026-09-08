@@ -67,6 +67,15 @@ actor LlamaServerProcessSource: SidecarProcessSource {
             "-m", modelURL.path,
             "-c", "2048",
             "--no-webui",
+            "-t", String(Self.llamaThreadCount()),
+            // No `-ngl` cap: full GPU (Metal) offload is left in place. Unlike CPU
+            // threads — where an uncapped `-t` here plus whisper's own pool
+            // (WhisperSTTEngine.swift) can directly starve WindowServer's CPU time —
+            // Metal's command-queue scheduler arbitrates GPU work across processes,
+            // and WindowServer's own GPU (compositing) load is comparatively light
+            // next to its CPU load. This fix targets the CPU-thread starvation the
+            // issue calls out; revisit `-ngl` separately if GPU contention with the
+            // UI is observed in practice.
         ]
 
         let handle = try Self.openLogHandle(at: logFileURL)
@@ -121,6 +130,20 @@ actor LlamaServerProcessSource: SidecarProcessSource {
     }
 
     // MARK: - Helpers
+
+    /// `-t` thread cap for `llama-server`'s own pool. Previously omitted entirely,
+    /// which let llama-server default to using every core — on top of
+    /// `WhisperSTTEngine`'s own uncapped pool — and starve the system, since a single
+    /// voice command's STT and LLM stages can run concurrently. Cap llama-server at
+    /// half the cores (minimum 1): that leaves the other half free for whisper's
+    /// concurrent thread pool and the rest of the system (WindowServer etc.), without
+    /// pinning an unproportional fixed number that would be wrong on a small or large
+    /// Mac alike.
+    private static let llamaCoreDivisor = 2
+
+    private static func llamaThreadCount() -> Int {
+        max(1, ProcessInfo.processInfo.activeProcessorCount / llamaCoreDivisor)
+    }
 
     private func closeLogHandle() {
         try? logHandle?.close()

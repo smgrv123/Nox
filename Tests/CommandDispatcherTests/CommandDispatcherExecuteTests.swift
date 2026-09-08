@@ -64,7 +64,10 @@ final class CommandDispatcherExecuteTests: XCTestCase {
         let outcome = await dispatcher.dispatch(intent, whisperAvgLogprob: -0.2)
 
         XCTAssertEqual(
-            outcome, .executed(SkillResult(summary: "General Q&A is not yet available")))
+            outcome,
+            .executed(
+                SkillResult(
+                    summary: "I can't answer general questions yet — that's coming in a future update.")))
         XCTAssertEqual(executor.executeCallCount, 0)
         XCTAssertEqual(scanner.scanCallCount, 0)
     }
@@ -89,7 +92,11 @@ final class CommandDispatcherExecuteTests: XCTestCase {
         let outcome = await dispatcher.dispatch(intent, whisperAvgLogprob: -0.2)
 
         XCTAssertEqual(
-            outcome, .executed(SkillResult(summary: "Screen Q&A is not yet available")))
+            outcome,
+            .executed(
+                SkillResult(
+                    summary:
+                        "I can't answer questions about your screen yet — that's coming in a future update.")))
         XCTAssertEqual(executor.executeCallCount, 0)
         XCTAssertEqual(scanner.scanCallCount, 0)
     }
