@@ -3,6 +3,7 @@ import BuiltinSkills
 import CommandDispatcher
 import CommandMode
 import CommandRouter
+import Configuration
 import DangerousCommandScanner
 import Dictation
 import Foundation
@@ -18,7 +19,7 @@ extension AppCoordinator {
 
     /// Async composition root for Command Mode (plan Phase 2). Pre-renders the
     /// registry grammar and catalog, builds the mux, and injects it into
-    /// `VoiceSessionCoordinator`. Dictation uses `DictationDriver` (P5a Phase 3).
+    /// `VoiceSessionCoordinator`. Dictation uses `DictationDriver` (P5a Phase 4).
     func setUpCommandMode() async {
         let engine = WhisperSTTEngine(
             modelURL: AppCoordinator.modelsDirectory.blobURL(for: resolvedSttModelDescriptor))
@@ -35,6 +36,18 @@ extension AppCoordinator {
             llm: InferenceClient(),
             resolveEndpoint: { [weak self] in
                 try await Self.resolveLiveSidecarEndpoint(from: self)
+            },
+            tonePreset: { [weak self] in
+                Self.mapTonePreset(self?.settings.tone.defaultPreset ?? .asIs)
+            },
+            overrides: { [weak self] in
+                Self.mapInsertionOverrides(self?.settings.textInsertion.appOverrides ?? [:])
+            },
+            cleanupEnabled: { [weak self] in
+                self?.settings.dictation.cleanupEnabled ?? true
+            },
+            sidecarReady: { [weak self] in
+                await self?.isDictationSidecarReady() ?? false
             })
         let command = await makeCommandModeDriver(engine: engine, capture: capture, preGate: preGate)
         let mux = MuxVoiceSessionDriver(command: command, dictation: dictation)
@@ -121,6 +134,9 @@ extension AppCoordinator {
     /// than each racing to construct their own; `startIfNeeded`/readiness are then
     /// awaited off the main actor as before, relying on
     /// `SidecarLifecycleController.startIfNeeded`'s existing idempotency.
+    ///
+    /// Dictation must **not** take this 45s wait when the Sidecar is cold — it probes
+    /// `isDictationSidecarReady()` (current `SidecarState` only) and inserts raw.
     private static func resolveLiveSidecarEndpoint(
         from coordinator: AppCoordinator?
     ) async throws -> LLMEndpoint {
@@ -149,6 +165,53 @@ extension AppCoordinator {
             throw RoutingError.cloudEndpointRejected
         }
         return endpoint
+    }
+
+    /// Probe current `SidecarState` only — never `startIfNeeded` / never the 45s
+    /// `resolveLiveSidecarEndpoint` wait. A cold Sidecar inserts raw this utterance;
+    /// `startIfNeeded` is kicked off in the background so the *next* utterance can
+    /// clean up.
+    private func isDictationSidecarReady() async -> Bool {
+        let manager = await MainActor.run { sidecarManagerInstance }
+        guard let manager else {
+            warmDictationSidecarInBackground()
+            return false
+        }
+        if case .ready = await manager.state {
+            return true
+        }
+        warmDictationSidecarInBackground()
+        return false
+    }
+
+    /// Fire-and-forget Sidecar start. Must not be awaited on the insert path.
+    private func warmDictationSidecarInBackground() {
+        Task { [weak self] in
+            guard let self else { return }
+            guard
+                let (manager, model) = await MainActor.run(body: {
+                    self.ensureSidecarManagerIfModelProvisioned()
+                })
+            else { return }
+            try? await manager.startIfNeeded(model: model)
+        }
+    }
+
+    /// Map Configuration's duplicated tone-preset enum onto Dictation's at the
+    /// App boundary so neither module imports the other.
+    private static func mapTonePreset(_ preset: Settings.TonePreset) -> Dictation.TonePreset {
+        Dictation.TonePreset(rawValue: preset.rawValue) ?? .asIs
+    }
+
+    /// Map Configuration's duplicated `ax`/`paste` enum onto Dictation's at the
+    /// App boundary so neither module imports the other.
+    private static func mapInsertionOverrides(
+        _ overrides: [String: Settings.InsertionOverride]
+    ) -> [String: AppInsertionOverride] {
+        Dictionary(
+            uniqueKeysWithValues: overrides.compactMap { bundleID, override in
+                AppInsertionOverride(rawValue: override.rawValue).map { (bundleID, $0) }
+            })
     }
 }
 

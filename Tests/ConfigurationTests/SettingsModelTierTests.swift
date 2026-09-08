@@ -17,7 +17,7 @@ final class SettingsModelTierTests: XCTestCase {
     }
 
     func testCurrentVersionFileWithModelTierDecodesIt() throws {
-        let json = Data(#"{"schema_version":5,"model_tier":"8gb"}"#.utf8)
+        let json = Data(#"{"schema_version":6,"model_tier":"8gb"}"#.utf8)
         let settings = try SettingsCodec.decode(json).settings
         XCTAssertEqual(settings.modelTier, "8gb")
     }

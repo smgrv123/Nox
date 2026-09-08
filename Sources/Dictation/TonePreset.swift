@@ -1,7 +1,8 @@
 import Foundation
 
 /// Dictation tone-cleanup presets (LLD §4.6). Default is `asIs` — fix grammar and
-/// filler, keep the user's wording. Voice-prefix override and Settings land in Phase 4.
+/// filler, keep the user's wording. Voice-prefix override and Settings (schema v6)
+/// land in Phase 4.
 public enum TonePreset: String, Equatable, Sendable, Codable {
     case asIs = "as_is"
     case professional

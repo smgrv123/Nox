@@ -13,11 +13,11 @@ final class SettingsCodecTests: XCTestCase {
     // MARK: - Current-version decode
 
     func testCurrentVersionFileDecodesDirectlyWithoutMigration() throws {
-        // A current-version (v5) document whose audio cue + hotkeys are non-default
+        // A current-version (v6) document whose audio cue + hotkeys are non-default
         // must decode to those values and report no migration.
         let json = Data(
             """
-            {"schema_version":5,
+            {"schema_version":6,
             "hotkeys":{"command_mode":{"key_code":36,"modifiers":["command","shift"],"mode":"push_to_talk"},
             "dictation_mode":{"key_code":49,"modifiers":["control"],"mode":"push_to_talk"}},
             "indicators":{"show_local_cloud_indicator":false,
@@ -204,22 +204,22 @@ final class SettingsCodecTests: XCTestCase {
     // MARK: - Encode: preserving unmodeled top-level blocks (§2.5 forward-compat)
 
     func testEncodeMergingPreservesUnmodeledTopLevelBlock() throws {
-        // `tone` is a real §2.5 block this build doesn't model yet (a future block a
-        // newer build writes is the same shape of problem — Phase 10 modeled
-        // `privacy`, so `tone` is now the stand-in unmodeled example). A decode →
-        // re-encode round trip must not destroy it.
+        // `wake_word` is a real §2.5 block this build doesn't model yet (a future
+        // block a newer build writes is the same shape of problem — P5a Phase 4
+        // modeled `tone`, so `wake_word` is now the stand-in unmodeled example). A
+        // decode → re-encode round trip must not destroy it.
         let existing = Data(
             """
             {"schema_version":2,"hotkeys":{},"indicators":{},
-            "tone":{"default_preset":"as_is","available":["as_is","professional"]}}
+            "wake_word":{"enabled":false,"engine":"openWakeWord","experimental":true}}
             """.utf8)
 
         let data = try SettingsCodec.encode(.defaults, mergingUnknownTopLevelKeysFrom: existing)
 
         let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
-        let tone = try XCTUnwrap(object["tone"] as? [String: Any])
-        XCTAssertEqual(tone["default_preset"] as? String, "as_is")
-        XCTAssertEqual(tone["available"] as? [String], ["as_is", "professional"])
+        let wakeWord = try XCTUnwrap(object["wake_word"] as? [String: Any])
+        XCTAssertEqual(wakeWord["enabled"] as? Bool, false)
+        XCTAssertEqual(wakeWord["engine"] as? String, "openWakeWord")
 
         // Modeled blocks reflect the passed-in `Settings`, not whatever was on disk.
         XCTAssertEqual(try SettingsCodec.decode(data).settings, .defaults)

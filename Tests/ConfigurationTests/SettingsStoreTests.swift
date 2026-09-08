@@ -133,10 +133,10 @@ final class SettingsStoreTests: XCTestCase {
 
     func testSaveDoesNotDropUnmodeledTopLevelBlocks() throws {
         // Seed a document with every currently-modeled block PLUS a real §2.5 block
-        // (`tone`) this build's `Settings` doesn't represent yet (Phase 10 modeled
-        // `privacy`, so `tone` is now the stand-in unmodeled example). A load →
-        // modify a modeled field → save() cycle must keep `tone` byte-for-byte,
-        // while the modeled change still lands.
+        // (`wake_word`) this build's `Settings` doesn't represent yet (P5a Phase 4
+        // modeled `tone`, so `wake_word` is now the stand-in unmodeled example). A
+        // load → modify a modeled field → save() cycle must keep `wake_word`
+        // byte-for-byte, while the modeled change still lands.
         let seeded = Data(
             """
             {"schema_version":3,
@@ -144,7 +144,7 @@ final class SettingsStoreTests: XCTestCase {
             "dictation_mode":{"key_code":49,"modifiers":["control"],"mode":"push_to_talk"}},
             "indicators":{"show_local_cloud_indicator":true,
             "audio_cue_on_listen":true,"audio_cue_on_processing":false,"overlay_position":"bottom_center"},
-            "tone":{"default_preset":"as_is","available":["as_is","professional","casual","concise"]}}
+            "wake_word":{"enabled":false,"engine":"openWakeWord","experimental":true}}
             """.utf8)
         try seeded.write(to: settingsURL)
         let store = makeStore()
@@ -155,9 +155,9 @@ final class SettingsStoreTests: XCTestCase {
 
         let raw = try XCTUnwrap(
             try JSONSerialization.jsonObject(with: try Data(contentsOf: settingsURL)) as? [String: Any])
-        let tone = try XCTUnwrap(raw["tone"] as? [String: Any])
-        XCTAssertEqual(tone["default_preset"] as? String, "as_is", "unmodeled block must survive save() verbatim")
-        XCTAssertEqual(tone["available"] as? [String], ["as_is", "professional", "casual", "concise"])
+        let wakeWord = try XCTUnwrap(raw["wake_word"] as? [String: Any])
+        XCTAssertEqual(wakeWord["enabled"] as? Bool, false, "unmodeled block must survive save() verbatim")
+        XCTAssertEqual(wakeWord["engine"] as? String, "openWakeWord")
 
         // Nothing modeled was lost either — the change persisted.
         let reloaded = makeStore().load()

@@ -120,7 +120,9 @@ func makeDictationDriver(
         throw DictationTestError.endpointUnavailable
     },
     tonePreset: @escaping @Sendable () -> TonePreset = { .asIs },
-    overrides: @escaping @Sendable () -> [String: AppInsertionOverride] = { [:] }
+    overrides: @escaping @Sendable () -> [String: AppInsertionOverride] = { [:] },
+    cleanupEnabled: @escaping @Sendable () -> Bool = { true },
+    sidecarReady: @escaping @Sendable () async -> Bool = { true }
 ) -> DictationDriver {
     DictationDriver(
         engine: engine,
@@ -131,7 +133,9 @@ func makeDictationDriver(
         llm: llm,
         resolveEndpoint: resolveEndpoint,
         tonePreset: tonePreset,
-        overrides: overrides)
+        overrides: overrides,
+        cleanupEnabled: cleanupEnabled,
+        sidecarReady: sidecarReady)
 }
 
 @MainActor

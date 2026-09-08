@@ -6,7 +6,7 @@ import SpeechToText
 
 /// Dictation-mode `VoiceSessionDriver`: capture → transcribe → Pre-Gate →
 /// terminal-destination scan → tone cleanup → insert at the caret
-/// (plans/P5a-dictation-core.md Phase 3). Overlay/coordinator stay unchanged;
+/// (plans/P5a-dictation-core.md Phase 4). Overlay/coordinator stay unchanged;
 /// the mux swaps this in for `STTVoiceSessionDriver` on `.dictation`.
 ///
 /// Depends on `STTEngine`, `AudioCaptureBuffer`, `SegmentPreGate`,
@@ -20,6 +20,7 @@ public final class DictationDriver: VoiceSessionDriver {
     public static let modelNotReadySummary = "Speech model isn't ready yet."
     public static let microphoneUnavailableSummary = "Couldn't access the microphone."
     public static let cleanupFailedSummary = "Inserted raw — cleanup failed."
+    public static let sidecarNotReadySummary = "Inserted raw — language model wasn't ready."
 
     private let engine: any STTEngine
     private let capture: any AudioCaptureBuffer
@@ -29,6 +30,8 @@ public final class DictationDriver: VoiceSessionDriver {
     private let llm: any LLMClient
     private let resolveEndpoint: @Sendable () async throws -> LLMEndpoint
     private let tonePreset: @Sendable () -> TonePreset
+    private let cleanupEnabled: @Sendable () -> Bool
+    private let sidecarReady: @Sendable () async -> Bool
     private let planner = InsertionPlanner()
     private let overrides: @Sendable () -> [String: AppInsertionOverride]
     private let makeInitialPrompt: @Sendable () async -> String?
@@ -42,6 +45,7 @@ public final class DictationDriver: VoiceSessionDriver {
     private struct PendingInsert {
         let text: String
         let plan: InsertionPlan
+        let tone: TonePreset
         let generation: Int
     }
 
@@ -55,6 +59,8 @@ public final class DictationDriver: VoiceSessionDriver {
         resolveEndpoint: @escaping @Sendable () async throws -> LLMEndpoint,
         tonePreset: @escaping @Sendable () -> TonePreset = { .asIs },
         overrides: @escaping @Sendable () -> [String: AppInsertionOverride] = { [:] },
+        cleanupEnabled: @escaping @Sendable () -> Bool = { true },
+        sidecarReady: @escaping @Sendable () async -> Bool = { true },
         makeInitialPrompt: @escaping @Sendable () async -> String? = { nil },
         dictionarySubstitutions: @escaping @Sendable () async -> String = { "" }
     ) {
@@ -66,6 +72,8 @@ public final class DictationDriver: VoiceSessionDriver {
         self.llm = llm
         self.resolveEndpoint = resolveEndpoint
         self.tonePreset = tonePreset
+        self.cleanupEnabled = cleanupEnabled
+        self.sidecarReady = sidecarReady
         self.overrides = overrides
         self.makeInitialPrompt = makeInitialPrompt
         self.dictionarySubstitutions = dictionarySubstitutions
@@ -129,7 +137,8 @@ public final class DictationDriver: VoiceSessionDriver {
         let generation = pending.generation
         Task { @MainActor [weak self] in
             guard let self, self.generation == generation else { return }
-            await self.performInsert(pending.text, plan: pending.plan, generation: generation)
+            await self.performInsert(
+                pending.text, plan: pending.plan, tone: pending.tone, generation: generation)
         }
     }
 
@@ -169,6 +178,9 @@ public final class DictationDriver: VoiceSessionDriver {
 
     @MainActor
     private func scanThenInsert(_ text: String, generation: Int) async {
+        let parsed = TonePrefixParser().parse(text)
+        let remainder = parsed.remainder
+        let tone = parsed.preset ?? tonePreset()
         let focus = await inserter.resolveFocus()
         let override = focus.bundleID.flatMap { overrides()[$0] }
         let isTerminal = focus.bundleID.map(TerminalBundleAllowlist.contains) ?? false
@@ -176,7 +188,7 @@ public final class DictationDriver: VoiceSessionDriver {
 
         if isTerminal, let bundleID = focus.bundleID {
             let verdict = scanner.scan(
-                text,
+                remainder,
                 context: ScanContext(
                     channel: .dictatedOneOff,
                     destinationBundleID: bundleID,
@@ -185,35 +197,33 @@ public final class DictationDriver: VoiceSessionDriver {
             case .clean:
                 break
             case .confirm:
-                pendingInsert = PendingInsert(text: text, plan: plan, generation: generation)
+                pendingInsert = PendingInsert(
+                    text: remainder, plan: plan, tone: tone, generation: generation)
                 deliver(
                     .confirmBack(
                         ConfirmBackInfo(
-                            transcript: text,
-                            intent: text,
+                            transcript: remainder,
+                            intent: remainder,
                             skillID: "dictation_insert",
                             riskTier: .alwaysConfirm)),
                     generation: generation)
                 return
             case .hardBlock(let findings):
                 deliver(
-                    .hardBlocked(text, findings.first?.explanation ?? "Blocked"),
+                    .hardBlocked(remainder, findings.first?.explanation ?? "Blocked"),
                     generation: generation)
                 return
             }
         }
 
-        await performInsert(text, plan: plan, generation: generation)
+        await performInsert(remainder, plan: plan, tone: tone, generation: generation)
     }
 
     @MainActor
-    private func performInsert(_ rawText: String, plan: InsertionPlan, generation: Int) async {
-        let cleanup = await runDictationCleanup(
-            raw: rawText,
-            llm: llm,
-            resolveEndpoint: resolveEndpoint,
-            tonePreset: tonePreset,
-            dictionarySubstitutions: dictionarySubstitutions)
+    private func performInsert(
+        _ rawText: String, plan: InsertionPlan, tone: TonePreset, generation: Int
+    ) async {
+        let cleanup = await runDictationCleanup(raw: rawText, tone: tone)
         let insertion = await inserter.insert(cleanup.text, plan: plan)
         guard self.generation == generation else { return }
 
@@ -253,11 +263,13 @@ public final class DictationDriver: VoiceSessionDriver {
 private enum DictationCleanupOutcome {
     case cleaned(String)
     case skipped(String)
+    case sidecarNotReady(String)
     case chatFailed(String)
 
     var text: String {
         switch self {
-        case .cleaned(let text), .skipped(let text), .chatFailed(let text):
+        case .cleaned(let text), .skipped(let text), .sidecarNotReady(let text),
+            .chatFailed(let text):
             return text
         }
     }
@@ -266,6 +278,8 @@ private enum DictationCleanupOutcome {
         switch self {
         case .cleaned(let text), .skipped(let text):
             return text
+        case .sidecarNotReady:
+            return DictationDriver.sidecarNotReadySummary
         case .chatFailed:
             return DictationDriver.cleanupFailedSummary
         }
@@ -275,41 +289,44 @@ private enum DictationCleanupOutcome {
 private let dictationCleanupSampling = SamplingParams(
     temperature: 0.2, topP: 1.0, maxTokens: 1024, topLogprobs: 0)
 
-private func runDictationCleanup(
-    raw: String,
-    llm: any LLMClient,
-    resolveEndpoint: @Sendable () async throws -> LLMEndpoint,
-    tonePreset: @Sendable () -> TonePreset,
-    dictionarySubstitutions: @Sendable () async -> String
-) async -> DictationCleanupOutcome {
-    let endpoint: LLMEndpoint
-    do {
-        endpoint = try await resolveEndpoint()
-    } catch {
-        return .skipped(raw)
-    }
-    guard endpoint.isLocal else {
-        return .skipped(raw)
-    }
-
-    do {
-        let substitutions = await dictionarySubstitutions()
-        let prompt = CleanupPromptBuilder.build(
-            tone: tonePreset(),
-            substitutions: substitutions,
-            rawTranscript: raw)
-        let stream = try await llm.chat(
-            system: CleanupPromptBuilder.system,
-            messages: [ChatMessage(role: .user, content: prompt)],
-            params: dictationCleanupSampling,
-            endpoint: endpoint,
-            stream: false)
-        var combined = ""
-        for try await chunk in stream {
-            combined += chunk.delta
+extension DictationDriver {
+    fileprivate func runDictationCleanup(raw: String, tone: TonePreset) async -> DictationCleanupOutcome {
+        guard cleanupEnabled() else {
+            return .skipped(raw)
         }
-        return .cleaned(CleanupResponseSanitizer.sanitize(combined))
-    } catch {
-        return .chatFailed(raw)
+        guard await sidecarReady() else {
+            return .sidecarNotReady(raw)
+        }
+
+        let endpoint: LLMEndpoint
+        do {
+            endpoint = try await resolveEndpoint()
+        } catch {
+            return .skipped(raw)
+        }
+        guard endpoint.isLocal else {
+            return .skipped(raw)
+        }
+
+        do {
+            let substitutions = await dictionarySubstitutions()
+            let prompt = CleanupPromptBuilder.build(
+                tone: tone,
+                substitutions: substitutions,
+                rawTranscript: raw)
+            let stream = try await llm.chat(
+                system: CleanupPromptBuilder.system,
+                messages: [ChatMessage(role: .user, content: prompt)],
+                params: dictationCleanupSampling,
+                endpoint: endpoint,
+                stream: false)
+            var combined = ""
+            for try await chunk in stream {
+                combined += chunk.delta
+            }
+            return .cleaned(CleanupResponseSanitizer.sanitize(combined))
+        } catch {
+            return .chatFailed(raw)
+        }
     }
 }

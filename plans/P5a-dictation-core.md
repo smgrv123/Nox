@@ -237,11 +237,11 @@ Add `LLMRuntime` to the `Dictation` target deps.
 
 ### Acceptance criteria
 
-- [ ] v5 settings files migrate; hotkeys preserved.
-- [ ] Named tests pass.
-- [ ] Dictation pane visible in Settings.
+- [x] v5 settings files migrate; hotkeys preserved.
+- [x] Named tests pass.
+- [x] Dictation pane visible in Settings.
 - [ ] Manual: cleanup off → raw with sidecar warm; cleanup on + quit sidecar / before first load → raw with the exact Overlay summary.
-- [ ] Per-phase gate green.
+- [x] Per-phase gate green.
 
 ---
 

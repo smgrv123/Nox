@@ -101,6 +101,14 @@ enum SettingsMigrator {
                 migrated["schema_version"] = 5
                 return migrated
             },
+            // v5 → v6 (P5a Phase 4). v6 models `tone`, `dictation`, and `text_insertion`.
+            // Absent keys are left absent; `Settings`' tolerant decoder supplies defaults
+            // (`as_is`, cleanup on, empty overrides). Do not invent large default blobs.
+            SettingsMigration(from: 5, to: 6) { v5 in
+                var migrated = v5
+                migrated["schema_version"] = 6
+                return migrated
+            },
         ]
     }
 

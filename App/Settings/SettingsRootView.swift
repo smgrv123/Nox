@@ -25,6 +25,9 @@ struct SettingsRootView: View {
             SettingsPane(id: "overlay", title: "Overlay", systemImage: "rectangle.inset.filled") {
                 OverlayOptionsPane(coordinator: coordinator)
             },
+            SettingsPane(id: "dictation", title: "Dictation", systemImage: "mic") {
+                DictationPane(coordinator: coordinator)
+            },
             SettingsPane(id: "data", title: "Data", systemImage: "trash") {
                 DataPane(coordinator: coordinator)
             },
