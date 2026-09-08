@@ -6,7 +6,7 @@ import SpeechToText
 
 /// Dictation-mode `VoiceSessionDriver`: capture → transcribe → Pre-Gate →
 /// terminal-destination scan → tone cleanup → insert at the caret
-/// (plans/P5a-dictation-core.md Phase 4). Overlay/coordinator stay unchanged;
+/// (plans/P5a-dictation-core.md Phase 5). Overlay/coordinator stay unchanged;
 /// the mux swaps this in for `STTVoiceSessionDriver` on `.dictation`.
 ///
 /// Depends on `STTEngine`, `AudioCaptureBuffer`, `SegmentPreGate`,
@@ -21,6 +21,9 @@ public final class DictationDriver: VoiceSessionDriver {
     public static let microphoneUnavailableSummary = "Couldn't access the microphone."
     public static let cleanupFailedSummary = "Inserted raw — cleanup failed."
     public static let sidecarNotReadySummary = "Inserted raw — language model wasn't ready."
+    public static let copiedToClipboardSummary = "Couldn't insert — copied to clipboard instead."
+    public static let accessibilityDeniedSummary =
+        "Text insertion needs Accessibility. Enable Aide in System Settings."
 
     private let engine: any STTEngine
     private let capture: any AudioCaptureBuffer
@@ -36,17 +39,21 @@ public final class DictationDriver: VoiceSessionDriver {
     private let overrides: @Sendable () -> [String: AppInsertionOverride]
     private let makeInitialPrompt: @Sendable () async -> String?
     private let dictionarySubstitutions: @Sendable () async -> String
+    private let recordOverride: @Sendable (String, AppInsertionOverride) -> Void
+    private let appendHistory: @Sendable (DictationHistoryEntry) -> Void
 
     private var generation = 0
     private var activeMode: VoiceSessionMode = .dictation
     private var captureTask: Task<Bool, Never>?
     private var pendingInsert: PendingInsert?
 
-    private struct PendingInsert {
+    fileprivate struct PendingInsert {
         let text: String
         let plan: InsertionPlan
         let tone: TonePreset
         let generation: Int
+        let focus: InsertionFocus
+        let override: AppInsertionOverride?
     }
 
     public init(
@@ -62,7 +69,9 @@ public final class DictationDriver: VoiceSessionDriver {
         cleanupEnabled: @escaping @Sendable () -> Bool = { true },
         sidecarReady: @escaping @Sendable () async -> Bool = { true },
         makeInitialPrompt: @escaping @Sendable () async -> String? = { nil },
-        dictionarySubstitutions: @escaping @Sendable () async -> String = { "" }
+        dictionarySubstitutions: @escaping @Sendable () async -> String = { "" },
+        recordOverride: @escaping @Sendable (String, AppInsertionOverride) -> Void = { _, _ in },
+        appendHistory: @escaping @Sendable (DictationHistoryEntry) -> Void = { _ in }
     ) {
         self.engine = engine
         self.capture = capture
@@ -77,6 +86,8 @@ public final class DictationDriver: VoiceSessionDriver {
         self.overrides = overrides
         self.makeInitialPrompt = makeInitialPrompt
         self.dictionarySubstitutions = dictionarySubstitutions
+        self.recordOverride = recordOverride
+        self.appendHistory = appendHistory
     }
 
     public func begin(mode: VoiceSessionMode) {
@@ -137,8 +148,7 @@ public final class DictationDriver: VoiceSessionDriver {
         let generation = pending.generation
         Task { @MainActor [weak self] in
             guard let self, self.generation == generation else { return }
-            await self.performInsert(
-                pending.text, plan: pending.plan, tone: pending.tone, generation: generation)
+            await self.performInsert(pending)
         }
     }
 
@@ -154,9 +164,12 @@ public final class DictationDriver: VoiceSessionDriver {
                 generation: generation)
         }
     }
+}
+
+extension DictationDriver {
 
     @MainActor
-    private func resolve(_ pcm: PCMBuffer, mode: VoiceSessionMode, generation: Int) async {
+    fileprivate func resolve(_ pcm: PCMBuffer, mode: VoiceSessionMode, generation: Int) async {
         do {
             try await engine.ensureLoaded()
             let normalized = Self.peakNormalize(pcm)
@@ -177,7 +190,7 @@ public final class DictationDriver: VoiceSessionDriver {
     }
 
     @MainActor
-    private func scanThenInsert(_ text: String, generation: Int) async {
+    fileprivate func scanThenInsert(_ text: String, generation: Int) async {
         let parsed = TonePrefixParser().parse(text)
         let remainder = parsed.remainder
         let tone = parsed.preset ?? tonePreset()
@@ -198,7 +211,12 @@ public final class DictationDriver: VoiceSessionDriver {
                 break
             case .confirm:
                 pendingInsert = PendingInsert(
-                    text: remainder, plan: plan, tone: tone, generation: generation)
+                    text: remainder,
+                    plan: plan,
+                    tone: tone,
+                    generation: generation,
+                    focus: focus,
+                    override: override)
                 deliver(
                     .confirmBack(
                         ConfirmBackInfo(
@@ -216,27 +234,87 @@ public final class DictationDriver: VoiceSessionDriver {
             }
         }
 
-        await performInsert(remainder, plan: plan, tone: tone, generation: generation)
+        await performInsert(
+            PendingInsert(
+                text: remainder,
+                plan: plan,
+                tone: tone,
+                generation: generation,
+                focus: focus,
+                override: override))
     }
 
     @MainActor
-    private func performInsert(
-        _ rawText: String, plan: InsertionPlan, tone: TonePreset, generation: Int
-    ) async {
-        let cleanup = await runDictationCleanup(raw: rawText, tone: tone)
-        let insertion = await inserter.insert(cleanup.text, plan: plan)
-        guard self.generation == generation else { return }
+    fileprivate func performInsert(_ pending: PendingInsert) async {
+        let cleanup = await runDictationCleanup(raw: pending.text, tone: pending.tone)
+        var insertion = await inserter.insert(cleanup.text, plan: pending.plan)
+        guard generation == pending.generation else { return }
 
-        deliver(.transcript(cleanup.text), generation: generation)
+        if case .failed = insertion {
+            await inserter.copyToClipboard(cleanup.text)
+            insertion = .copiedToClipboard
+        }
+
+        let learnedBundleID = Self.learnedPasteOverrideBundleID(
+            insertion: insertion, plan: pending.plan, focus: pending.focus)
+        if let bundleID = learnedBundleID {
+            recordOverride(bundleID, .paste)
+        }
+
+        let summary = Self.resultSummary(
+            insertion: insertion,
+            cleanupSummary: cleanup.resultSummary,
+            accessibilityTrusted: pending.focus.accessibilityTrusted,
+            override: pending.override)
+
+        appendHistory(
+            DictationHistoryEntry(
+                transcript: pending.text,
+                cleaned: cleanup.cleanedText,
+                cleanupRan: cleanup.didRun,
+                insertion: Self.historyInsertion(insertion),
+                destinationBundleID: pending.focus.bundleID))
+
+        deliver(.transcript(cleanup.text), generation: pending.generation)
+        deliver(
+            .result(VoiceSessionResult(transcript: cleanup.text, summary: summary)),
+            generation: pending.generation)
+    }
+
+    private static func learnedPasteOverrideBundleID(
+        insertion: InsertionResult,
+        plan: InsertionPlan,
+        focus: InsertionFocus
+    ) -> String? {
+        guard case .insertedViaPaste = insertion, plan == .axThenPaste else {
+            return nil
+        }
+        return focus.bundleID
+    }
+
+    private static func resultSummary(
+        insertion: InsertionResult,
+        cleanupSummary: String,
+        accessibilityTrusted: Bool,
+        override: AppInsertionOverride?
+    ) -> String {
         switch insertion {
-        case .insertedViaAX, .insertedViaPaste, .copiedToClipboard:
-            deliver(
-                .result(VoiceSessionResult(transcript: cleanup.text, summary: cleanup.resultSummary)),
-                generation: generation)
-        case .failed(let reason):
-            deliver(
-                .result(VoiceSessionResult(transcript: cleanup.text, summary: reason)),
-                generation: generation)
+        case .copiedToClipboard, .failed:
+            return copiedToClipboardSummary
+        case .insertedViaAX, .insertedViaPaste:
+            if !accessibilityTrusted, override != .paste {
+                return accessibilityDeniedSummary
+            }
+            return cleanupSummary
+        }
+    }
+
+    private static func historyInsertion(_ result: InsertionResult) -> String {
+        switch result {
+        case .insertedViaAX: return "ax"
+        case .insertedViaPaste: return "paste"
+        case .copiedToClipboard: return "copied"
+        case .failed: return "failed"
         }
     }
 
@@ -250,12 +328,12 @@ public final class DictationDriver: VoiceSessionDriver {
     }
 
     @MainActor
-    private func deliver(_ update: VoiceSessionUpdate, generation: Int) {
+    fileprivate func deliver(_ update: VoiceSessionUpdate, generation: Int) {
         guard generation == self.generation else { return }
         onUpdate?(update)
     }
 
-    private static func degraded(_ summary: String) -> VoiceSessionResult {
+    fileprivate static func degraded(_ summary: String) -> VoiceSessionResult {
         VoiceSessionResult(transcript: "", summary: summary)
     }
 }
@@ -282,6 +360,22 @@ private enum DictationCleanupOutcome {
             return DictationDriver.sidecarNotReadySummary
         case .chatFailed:
             return DictationDriver.cleanupFailedSummary
+        }
+    }
+
+    var cleanedText: String? {
+        if case .cleaned(let text) = self { return text }
+        return nil
+    }
+
+    /// PRD: history records *whether cleanup ran*, not whether it succeeded.
+    /// True only when the local LLM was actually called (`.cleaned` / `.chatFailed`).
+    var didRun: Bool {
+        switch self {
+        case .cleaned, .chatFailed:
+            return true
+        case .skipped, .sidecarNotReady:
+            return false
         }
     }
 }

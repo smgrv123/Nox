@@ -19,36 +19,14 @@ extension AppCoordinator {
 
     /// Async composition root for Command Mode (plan Phase 2). Pre-renders the
     /// registry grammar and catalog, builds the mux, and injects it into
-    /// `VoiceSessionCoordinator`. Dictation uses `DictationDriver` (P5a Phase 4).
+    /// `VoiceSessionCoordinator`. Dictation uses `DictationDriver` (P5a Phase 5).
     func setUpCommandMode() async {
         let engine = WhisperSTTEngine(
             modelURL: AppCoordinator.modelsDirectory.blobURL(for: resolvedSttModelDescriptor))
         let capture = AudioCapture()
         let preGate = SegmentPreGate(thresholds: .provisional)
 
-        let inserter = await MainActor.run { TextInserterLive() }
-        let dictation = DictationDriver(
-            engine: engine,
-            capture: capture,
-            preGate: preGate,
-            inserter: inserter,
-            scanner: DangerousCommandScanner(),
-            llm: InferenceClient(),
-            resolveEndpoint: { [weak self] in
-                try await Self.resolveLiveSidecarEndpoint(from: self)
-            },
-            tonePreset: { [weak self] in
-                Self.mapTonePreset(self?.settings.tone.defaultPreset ?? .asIs)
-            },
-            overrides: { [weak self] in
-                Self.mapInsertionOverrides(self?.settings.textInsertion.appOverrides ?? [:])
-            },
-            cleanupEnabled: { [weak self] in
-                self?.settings.dictation.cleanupEnabled ?? true
-            },
-            sidecarReady: { [weak self] in
-                await self?.isDictationSidecarReady() ?? false
-            })
+        let dictation = await makeDictationDriver(engine: engine, capture: capture, preGate: preGate)
         let command = await makeCommandModeDriver(engine: engine, capture: capture, preGate: preGate)
         let mux = MuxVoiceSessionDriver(command: command, dictation: dictation)
 
@@ -71,6 +49,43 @@ extension AppCoordinator {
             })
         overlay.onApprove = { [weak self] in self?.voiceSession?.approveConfirmBack() }
         overlay.onReject = { [weak self] in self?.voiceSession?.rejectConfirmBack() }
+    }
+
+    private func makeDictationDriver(
+        engine: any STTEngine,
+        capture: any AudioCaptureBuffer,
+        preGate: SegmentPreGate
+    ) async -> DictationDriver {
+        let inserter = await MainActor.run { TextInserterLive() }
+        return DictationDriver(
+            engine: engine,
+            capture: capture,
+            preGate: preGate,
+            inserter: inserter,
+            scanner: DangerousCommandScanner(),
+            llm: InferenceClient(),
+            resolveEndpoint: { [weak self] in
+                try await Self.resolveLiveSidecarEndpoint(from: self)
+            },
+            tonePreset: { [weak self] in
+                Self.mapTonePreset(self?.settings.tone.defaultPreset ?? .asIs)
+            },
+            overrides: { [weak self] in
+                Self.mapInsertionOverrides(self?.settings.textInsertion.appOverrides ?? [:])
+            },
+            cleanupEnabled: { [weak self] in
+                self?.settings.dictation.cleanupEnabled ?? true
+            },
+            sidecarReady: { [weak self] in
+                await self?.isDictationSidecarReady() ?? false
+            },
+            recordOverride: { [weak self] bundleID, override in
+                self?.recordAppInsertionOverride(bundleID: bundleID, override: override)
+            },
+            appendHistory: { [weak self] entry in
+                guard let storage = self?.storage else { return }
+                try? HistoryLog(fileURL: storage.historyFile(for: Date())).append(entry)
+            })
     }
 
     private func makeCommandModeDriver(

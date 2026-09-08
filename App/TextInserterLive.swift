@@ -37,6 +37,12 @@ final class TextInserterLive: TextInserting {
         }
     }
 
+    func copyToClipboard(_ text: String) async {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+    }
+
     private func insertViaAX(_ text: String) -> Bool {
         guard AXIsProcessTrusted() else { return false }
         let systemWide = AXUIElementCreateSystemWide()

@@ -39,12 +39,17 @@ final class RecordingInserter: TextInserting {
     var focus = InsertionFocus(bundleID: "com.apple.TextEdit", accessibilityTrusted: true)
     var result: InsertionResult = .insertedViaAX
     private(set) var inserted: [(text: String, plan: InsertionPlan)] = []
+    private(set) var copied: [String] = []
 
     func resolveFocus() async -> InsertionFocus { focus }
 
     func insert(_ text: String, plan: InsertionPlan) async -> InsertionResult {
         inserted.append((text, plan))
         return result
+    }
+
+    func copyToClipboard(_ text: String) async {
+        copied.append(text)
     }
 }
 
@@ -109,6 +114,22 @@ func dictationTestEndpoint(isLocal: Bool = true) -> LLMEndpoint {
         isLocal: isLocal)
 }
 
+final class RecordingOverrideSink: @unchecked Sendable {
+    private(set) var calls: [(bundleID: String, override: AppInsertionOverride)] = []
+
+    func record(bundleID: String, override: AppInsertionOverride) {
+        calls.append((bundleID, override))
+    }
+}
+
+final class RecordingHistorySink: @unchecked Sendable {
+    private(set) var entries: [DictationHistoryEntry] = []
+
+    func append(_ entry: DictationHistoryEntry) {
+        entries.append(entry)
+    }
+}
+
 @MainActor
 func makeDictationDriver(
     engine: MockSTTEngine,
@@ -122,7 +143,9 @@ func makeDictationDriver(
     tonePreset: @escaping @Sendable () -> TonePreset = { .asIs },
     overrides: @escaping @Sendable () -> [String: AppInsertionOverride] = { [:] },
     cleanupEnabled: @escaping @Sendable () -> Bool = { true },
-    sidecarReady: @escaping @Sendable () async -> Bool = { true }
+    sidecarReady: @escaping @Sendable () async -> Bool = { true },
+    recordOverride: @escaping @Sendable (String, AppInsertionOverride) -> Void = { _, _ in },
+    appendHistory: @escaping @Sendable (DictationHistoryEntry) -> Void = { _ in }
 ) -> DictationDriver {
     DictationDriver(
         engine: engine,
@@ -135,7 +158,9 @@ func makeDictationDriver(
         tonePreset: tonePreset,
         overrides: overrides,
         cleanupEnabled: cleanupEnabled,
-        sidecarReady: sidecarReady)
+        sidecarReady: sidecarReady,
+        recordOverride: recordOverride,
+        appendHistory: appendHistory)
 }
 
 @MainActor

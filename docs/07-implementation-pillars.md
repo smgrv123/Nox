@@ -134,6 +134,6 @@ Each pillar gets, in order:
 | P2 Inference Core | **Complete** — P2a · Speech-to-Text (all 5 phases) + P2b · LLM Runtime (all 6 phases) shipped |
 | P3 Safety Guard | **Complete** — all 6 phases shipped (`plans/P3-safety-guard.md`); recursive-descent scanner with 370 tests |
 | P4 Command Routing & Skills | **Complete** — headless Phases 1–7 (`plans/P4-command-routing-and-skills.md`) plus app-wiring Phases 1–6 (`plans/P4-app-wiring.md`) |
-| P5a Dictation Core | **In progress** — Phase 4 (tone presets, Settings v6, raw bypass) on `feat/p5a-dictation-core` (`plans/P5a-dictation-core.md`) |
+| P5a Dictation Core | **In progress** — Phase 5 (degradation, paste-override learning, history) implemented on `feat/p5a-dictation-core` (`plans/P5a-dictation-core.md`) |
 | P5b Personalization Dictionary | **Spec + plan authored** — implementation not started (`plans/P5b-personalization-dictionary.md`); execute after P5a |
 | P6, P7 | Not started |

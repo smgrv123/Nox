@@ -1,4 +1,5 @@
 import AideCore
+import Permissions
 import SwiftUI
 
 /// The `MenuBarExtra` menu content (User Stories 3, 4): a thin SwiftUI shell that
@@ -43,6 +44,20 @@ struct MenubarMenu: View {
             }
             Button("Re-check \(fixIt.permission.displayName)") {
                 coordinator.recheckInputMonitoring()
+            }
+            Divider()
+        }
+
+        // P5a (User Story 20): Accessibility has no in-app prompt (`canRequestInApp ==
+        // false`). Live-query the shared gate so the menubar deep-links to Privacy →
+        // Accessibility without a published coordinator field; Overlay stays text-only
+        // (plan: do not invent Overlay buttons). Settings Permissions already deep-links.
+        if let accessibilityFixIt = coordinator.permissionGate.advice(for: .accessibility) {
+            Text(accessibilityFixIt.hint)
+                .font(.caption)
+                .foregroundStyle(.orange)
+            Button("Open \(accessibilityFixIt.permission.displayName) Settings…") {
+                coordinator.openFixIt(accessibilityFixIt)
             }
             Divider()
         }

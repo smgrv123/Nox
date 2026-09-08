@@ -60,7 +60,7 @@ final class DictationDriverTests: XCTestCase {
         XCTAssertEqual(inserter.inserted.map(\.plan), [.pasteOnly])
     }
 
-    func testInsertFailedStillDeliversTranscriptWithFailureSummary() async {
+    func testInsertFailedStillDeliversTranscriptWithCopyEscapeSummary() async {
         let capture = FakeCaptureBuffer(finalizeReturns: dictationTestPCM)
         let inserter = RecordingInserter()
         let failureReason = "AX insert failed"
@@ -83,11 +83,15 @@ final class DictationDriverTests: XCTestCase {
 
         XCTAssertEqual(inserter.inserted.map(\.text), ["hello world"])
         XCTAssertEqual(inserter.inserted.map(\.plan), [.axThenPaste])
+        XCTAssertEqual(inserter.copied, ["hello world"])
         XCTAssertEqual(
             updates,
             [
                 .transcript("hello world"),
-                .result(VoiceSessionResult(transcript: "hello world", summary: failureReason)),
+                .result(
+                    VoiceSessionResult(
+                        transcript: "hello world",
+                        summary: DictationDriver.copiedToClipboardSummary)),
             ])
     }
 

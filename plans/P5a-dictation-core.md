@@ -265,9 +265,9 @@ Add `LLMRuntime` to the `Dictation` target deps.
 
 ### Acceptance criteria
 
-- [ ] Named tests pass.
+- [x] Named tests pass.
 - [ ] Manual: AX off → honest Overlay + paste or copy escape; VS Code paste success writes override; Settings pane shows it; `history/commands-*.jsonl` has a dictation line.
-- [ ] Per-phase gate green.
+- [x] Per-phase gate green.
 
 ---
 

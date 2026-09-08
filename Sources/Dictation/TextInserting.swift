@@ -40,7 +40,3 @@ public protocol TextInserting: AnyObject {
     func insert(_ text: String, plan: InsertionPlan) async -> InsertionResult
     func copyToClipboard(_ text: String) async
 }
-
-extension TextInserting {
-    public func copyToClipboard(_ text: String) async {}
-}
