@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "calculate",
+  "kind": "builtin",
+  "display_name": "Calculate",
+  "description": "Evaluate a mathematical expression and return the result.",
+  "utterance_examples": ["what is 42 times 7", "calculate 15% of 200", "what's 15% of 230"],
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["expression"],
+    "properties": {
+      "expression": { "type": "string", "minLength": 1, "maxLength": 500 }
+    }
+  },
+  "permissions": { "network": false, "requires": [] },
+  "schedule": null,
+  "risk_tier": "low",
+  "enabled": true,
+  "script_ref": null,
+  "generated_by": "builtin"
+}

@@ -36,6 +36,17 @@ final class HotkeyManager {
     private let logger = Logger(subsystem: "com.aide.Aide", category: "Hotkey")
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
+    /// The dedicated background thread the tap's run loop lives on (docs/05-lld.md §10:
+    /// "Hotkey CGEventTap callback runs on a dedicated run-loop thread"), never the main
+    /// thread. Tracked (rather than `CFRunLoopGetCurrent()`) so `deinit` removes the
+    /// source from the run loop that actually owns it, and so `start`/`retry` stay
+    /// idempotent across the async window between spawning the thread and the tap
+    /// finishing installation on it.
+    private var tapThread: Thread?
+    /// The tap's own `CFRunLoop`, captured on `tapThread` at install time. `deinit` uses
+    /// this — never `CFRunLoopGetCurrent()` — to remove `runLoopSource` from the correct
+    /// run loop.
+    private var tapRunLoop: CFRunLoop?
 
     /// The chords to match against, derived from `Settings.hotkeys`. Set by `start`;
     /// read only on the main actor.
@@ -80,9 +91,33 @@ final class HotkeyManager {
     func start(binder: HotkeyBinder) {
         self.binder = binder
         // Idempotent: never stack a second tap (keeps `retry()` safe to call repeatedly).
-        guard eventTap == nil else { return }
-        let mask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue)
+        // `tapThread` is guarded too, not just `eventTap`, because installation now
+        // finishes asynchronously on the dedicated thread below — without this, a
+        // `retry()` landing inside that window (before `eventTap` is set) would spawn a
+        // second thread racing to `tapCreate` a second tap.
+        guard eventTap == nil, tapThread == nil else { return }
 
+        // docs/05-lld.md §10: the active CGEventTap must live on a dedicated run-loop
+        // thread, never the main run loop — a main-thread stall would otherwise freeze
+        // system-wide input delivery for every app, not just Aide. `installEventTap()`
+        // runs entirely on this thread, whose run loop it then pumps forever.
+        let thread = Thread { [weak self] in
+            self?.installEventTap()
+        }
+        thread.name = "com.aide.Aide.HotkeyEventTap"
+        // Latency-sensitive: this thread must service the mach port promptly or macOS
+        // will disable the tap (`tapDisabledByTimeout`), so it gets the same QoS the
+        // main run loop would.
+        thread.qualityOfService = .userInteractive
+        tapThread = thread
+        thread.start()
+    }
+
+    /// Runs entirely on the dedicated tap thread spawned by `start(binder:)`: creates
+    /// the tap, wires its callback, attaches its run-loop source to *this* thread's run
+    /// loop, then pumps that run loop forever so the tap keeps being serviced.
+    private func installEventTap() {
+        let mask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue)
         guard
             let tap = CGEvent.tapCreate(
                 tap: .cgSessionEventTap,
@@ -92,7 +127,8 @@ final class HotkeyManager {
                 callback: { _, type, event, refcon in
                     let manager = Unmanaged<HotkeyManager>.fromOpaque(refcon!).takeUnretainedValue()
                     // Read the few primitive fields here (cheap) and hand off to the
-                    // main actor. NOTHING heavy runs in the tap — it returns immediately.
+                    // main actor. NOTHING heavy runs in the tap — it returns
+                    // immediately, on the dedicated tap thread, never the main thread.
                     manager.enqueue(type: type, event: event)
                     // Consume (swallow) a bound push-to-talk chord — including its
                     // autorepeat keyDowns — so the focused app never sees it, the same
@@ -107,32 +143,48 @@ final class HotkeyManager {
                 userInfo: Unmanaged.passUnretained(self).toOpaque()
             )
         else {
-            // Input Monitoring not granted: tapCreate fails. Surface an actionable message
-            // — never fail silently (User Story 15) — and the P7 fix-it (hint + exact-pane
-            // deep-link). The tap-create failure IS the Input-Monitoring-denied signal for
-            // the hotkey path — though now that the tap is active (`.defaultTap`, not
-            // listen-only), a `nil` here could ALSO mean Accessibility is the missing
-            // grant; say so explicitly so this run's logs point at the right pane.
+            // Input Monitoring not granted: tapCreate fails. Surface an actionable
+            // message — never fail silently (User Story 15) — and the P7 fix-it (hint
+            // + exact-pane deep-link). The tap-create failure IS the
+            // Input-Monitoring-denied signal for the hotkey path — though now that the
+            // tap is active (`.defaultTap`, not listen-only), a `nil` here could ALSO
+            // mean Accessibility is the missing grant; say so explicitly so this run's
+            // logs point at the right pane. Hop back to the main actor: `onStatus`/
+            // `onInputMonitoringStatus` and `tapThread` are main-actor-read state.
             logger.error(
                 "Event tap creation failed — grant Input Monitoring; the active .defaultTap tap may also need Accessibility."
             )
-            onStatus?(Self.inputMonitoringNeededStatus)
-            onInputMonitoringStatus?(PermissionAdvice.make(for: .inputMonitoring, status: .denied))
+            DispatchQueue.main.async {
+                self.onStatus?(Self.inputMonitoringNeededStatus)
+                self.onInputMonitoringStatus?(PermissionAdvice.make(for: .inputMonitoring, status: .denied))
+                // Allow a future start()/retry() to try again.
+                self.tapThread = nil
+            }
             return
         }
 
         let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-        CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
+        let runLoop = CFRunLoopGetCurrent()
+        CFRunLoopAddSource(runLoop, source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
 
-        self.eventTap = tap
-        self.runLoopSource = source
-        logger.info(
-            "CGEvent.tapCreate ok; isTapInstalled=\(self.isTapInstalled, privacy: .public) (2 push-to-talk hotkeys bound)."
-        )
-        onStatus?(Self.readyStatus)
-        // P7: tap installed ⇒ Input Monitoring is granted; clear any prior fix-it (recovery).
-        onInputMonitoringStatus?(nil)
+        DispatchQueue.main.async {
+            self.eventTap = tap
+            self.runLoopSource = source
+            self.tapRunLoop = runLoop
+            self.logger.info(
+                "CGEvent.tapCreate ok; isTapInstalled=\(self.isTapInstalled, privacy: .public) (2 push-to-talk hotkeys bound)."
+            )
+            self.onStatus?(Self.readyStatus)
+            // P7: tap installed ⇒ Input Monitoring is granted; clear any prior fix-it (recovery).
+            self.onInputMonitoringStatus?(nil)
+        }
+
+        // Pump this thread's run loop forever so the tap's mach-port source keeps
+        // being serviced; `deinit` removes the source and disables the tap, but does
+        // not need to stop this loop for correctness (the process is exiting or the
+        // manager outlives the app).
+        CFRunLoopRun()
     }
 
     /// Re-assert the event tap after a system event that can silently disable it —
@@ -226,8 +278,11 @@ final class HotkeyManager {
     }
 
     deinit {
-        if let source = runLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, .commonModes)
+        // The tap's source lives on `tapRunLoop` (the dedicated tap thread's run loop),
+        // never `CFRunLoopGetCurrent()` — deinit can run on whatever thread drops the
+        // last reference, which is not necessarily that thread.
+        if let source = runLoopSource, let runLoop = tapRunLoop {
+            CFRunLoopRemoveSource(runLoop, source, .commonModes)
         }
         if let tap = eventTap {
             CGEvent.tapEnable(tap: tap, enable: false)

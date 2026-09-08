@@ -4,7 +4,7 @@ import Foundation
 /// in UTC with millisecond precision (e.g. `2026-07-24T09:12:04.221Z`), matching
 /// the wire examples in docs/05-lld.md §2.6. Kept in one place so logs and history
 /// never drift apart.
-enum Timestamp {
+public enum Timestamp {
 
     /// Concurrent formatting is safe on `ISO8601DateFormatter`; a single shared
     /// instance mirrors `DangerousCommandScanner`'s static-rule idiom.
@@ -15,11 +15,11 @@ enum Timestamp {
         return formatter
     }()
 
-    static func string(from date: Date) -> String {
+    public static func string(from date: Date) -> String {
         formatter.string(from: date)
     }
 
-    static func date(from string: String) -> Date? {
+    public static func date(from string: String) -> Date? {
         formatter.date(from: string)
     }
 }

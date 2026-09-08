@@ -1075,14 +1075,16 @@ stateDiagram-v2
     Loading --> Resident: model ready (Sidecar .ready)
     Resident --> Serving: request in flight
     Serving --> Resident: response complete; reset idle timer
-    Resident --> Unloaded: [8GB tier] idle timeout elapsed (unload LLM to reclaim RAM)
-    Resident --> Resident: [16GB tier] stays resident (follow-ups instant)
+    Resident --> Unloaded: [8GB tier] idle timeout elapsed, 300s (unload LLM to reclaim RAM)
+    Resident --> Unloaded: [16GB tier] idle timeout elapsed, 180s (unload LLM to reclaim RAM)
     Resident --> SwappingTier: user overrides tier in settings
     SwappingTier --> Loading: reload with new model set
     note right of Unloaded
-        16GB: Whisper large-v3-turbo + Qwen3-8B Q4_K_M
+        16GB: Whisper large-v3-turbo + Qwen3-8B Q4_K_M;
+              LLM unloads after 3min idle (Command Mode inactivity),
+              reloads with visible brief loading state
         8GB:  Whisper small/medium + Qwen3-4B Q4;
-              LLM unloads after idle, reloads with visible
+              LLM unloads after 5min idle, reloads with visible
               brief loading state (never drops Session Context)
     end note
 ```

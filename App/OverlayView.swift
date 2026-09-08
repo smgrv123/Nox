@@ -7,8 +7,9 @@ import SwiftUI
 ///
 /// Phase 6 wires `.processing`/`.showingResult` to the real (mocked) transcript/result
 /// text via `controller.transcript`/`controller.result`, falling back to Phase 4's
-/// placeholder copy before either has arrived. `.promptBack`/`.confirmBack` remain
-/// placeholder visuals — outside this phase's happy path. The card is theme-aware
+/// placeholder copy before either has arrived. `.promptBack` shows the live
+/// "Did you mean…?" suggestion; `.confirmBack` shows "Confirm this action?" with
+/// Approve / Reject (P4 app wiring). The card is theme-aware
 /// (`.regularMaterial` + semantic colors) so it reads in light and dark.
 struct OverlayView: View {
     @ObservedObject var controller: OverlayController
@@ -71,11 +72,20 @@ struct OverlayView: View {
         case .promptBack:
             row(
                 icon: "questionmark.circle.fill", tint: .blue, title: "Did you mean…?",
-                detail: "Aide isn't sure — pick or rephrase.")
+                detail: controller.result ?? "Aide isn't sure — pick or rephrase.")
         case .confirmBack:
-            row(
-                icon: "exclamationmark.triangle.fill", tint: .orange, title: "Confirm?",
-                detail: "Approve this action before Aide runs it.")
+            VStack(alignment: .leading, spacing: 12) {
+                row(
+                    icon: "exclamationmark.triangle.fill", tint: .orange, title: "Confirm this action?",
+                    detail: controller.result ?? "Approve this action before Aide runs it.")
+                HStack {
+                    Button("Reject") { controller.onReject?() }
+                    Spacer()
+                    Button("Approve") { controller.onApprove?() }
+                        .keyboardShortcut(.defaultAction)
+                }
+                .buttonStyle(.bordered)
+            }
         }
     }
 

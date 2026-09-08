@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "set_timer",
+  "kind": "builtin",
+  "display_name": "Set Timer",
+  "description": "Set a countdown timer for the specified duration and optionally name it.",
+  "utterance_examples": ["set a timer for 5 minutes", "timer 30 seconds", "start a 10 minute timer called pasta"],
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["duration_seconds"],
+    "properties": {
+      "duration_seconds": { "type": "integer", "minimum": 1, "maximum": 86400 },
+      "label": { "type": "string", "maxLength": 80 }
+    }
+  },
+  "permissions": { "network": false, "requires": [] },
+  "schedule": null,
+  "risk_tier": "confirm",
+  "enabled": true,
+  "script_ref": null,
+  "generated_by": "builtin"
+}

@@ -21,6 +21,7 @@ final class OverlayStateMachineTests: XCTestCase {
         Transition(.promptBack, .dismiss, .hidden),
         Transition(.confirmBack, .approve, .showingResult),
         Transition(.confirmBack, .reject, .hidden),
+        Transition(.confirmBack, .dismiss, .hidden),
     ]
 
     private struct Transition {
@@ -86,12 +87,12 @@ final class OverlayStateMachineTests: XCTestCase {
         }
     }
 
-    /// Guards its own arithmetic: 6 states × 8 events = 48 pairs, of which exactly 10
-    /// are legal — so 38 must be rejected. A drift in either enum trips this.
+    /// Guards its own arithmetic: 6 states × 8 events = 48 pairs, of which exactly 11
+    /// are legal — so 37 must be rejected. A drift in either enum trips this.
     func testTransitionCensusMatchesTheDocumentedTable() {
         let total = OverlayState.allCases.count * OverlayEvent.allCases.count
         XCTAssertEqual(total, 48)
-        XCTAssertEqual(Self.legalTransitions.count, 10)
+        XCTAssertEqual(Self.legalTransitions.count, 11)
 
         var legalCount = 0
         for state in OverlayState.allCases {
@@ -99,7 +100,7 @@ final class OverlayStateMachineTests: XCTestCase {
                 legalCount += 1
             }
         }
-        XCTAssertEqual(legalCount, 10, "exactly 10 of the 48 pairs may be legal")
+        XCTAssertEqual(legalCount, 11, "exactly 11 of the 48 pairs may be legal")
     }
 
     // MARK: - Named behaviours called out by the PRD
@@ -121,6 +122,14 @@ final class OverlayStateMachineTests: XCTestCase {
     func testConfirmBackRejectedGoesToHidden() {
         var machine = OverlayStateMachine(state: .confirmBack)
         XCTAssertTrue(machine.send(.reject))
+        XCTAssertEqual(machine.state, .hidden)
+    }
+
+    /// An unanswered `ConfirmBack` (timeout) must still be able to return to `.hidden`
+    /// through the normal event vocabulary — otherwise the overlay locks permanently.
+    func testConfirmBackDismissGoesToHidden() {
+        var machine = OverlayStateMachine(state: .confirmBack)
+        XCTAssertTrue(machine.send(.dismiss))
         XCTAssertEqual(machine.state, .hidden)
     }
 

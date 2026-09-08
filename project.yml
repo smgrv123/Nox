@@ -93,6 +93,19 @@ targets:
       # compatible HTTP client, targeting the Sidecar's `LLMEndpoint` once `.ready`.
       - package: AideModules
         product: InferenceClient
+      # P4: skill manifests, registry, router, dispatcher, built-ins, command-mode driver.
+      - package: AideModules
+        product: SkillManifest
+      - package: AideModules
+        product: SkillRegistry
+      - package: AideModules
+        product: CommandRouter
+      - package: AideModules
+        product: CommandDispatcher
+      - package: AideModules
+        product: BuiltinSkills
+      - package: AideModules
+        product: CommandMode
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.aide.Aide

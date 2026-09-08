@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "id": "unit_conversion",
+  "kind": "builtin",
+  "display_name": "Unit Conversion",
+  "description": "Convert a numeric value between length, mass, temperature, volume, speed, or area units.",
+  "utterance_examples": [
+    "convert 10 miles to kilometers",
+    "how many pounds is 5 kilograms",
+    "convert 32 fahrenheit to celsius"
+  ],
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["value", "from_unit", "to_unit"],
+    "properties": {
+      "value": { "type": "number" },
+      "from_unit": { "type": "string", "minLength": 1, "maxLength": 40 },
+      "to_unit": { "type": "string", "minLength": 1, "maxLength": 40 }
+    }
+  },
+  "permissions": { "network": false, "requires": [] },
+  "schedule": null,
+  "risk_tier": "low",
+  "enabled": true,
+  "script_ref": null,
+  "generated_by": "builtin"
+}

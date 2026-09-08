@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "open_application",
+  "kind": "builtin",
+  "display_name": "Open Application",
+  "description": "Launch or switch focus to a macOS application the user names.",
+  "utterance_examples": ["open Safari", "launch Xcode", "switch to Notes"],
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["app_name"],
+    "properties": { "app_name": { "type": "string", "minLength": 1, "maxLength": 100 } }
+  },
+  "permissions": { "network": false, "requires": [] },
+  "schedule": null,
+  "risk_tier": "confirm",
+  "enabled": true,
+  "script_ref": null,
+  "generated_by": "builtin"
+}

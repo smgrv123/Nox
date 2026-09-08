@@ -26,11 +26,15 @@ public struct VoiceSessionResult: Equatable, Sendable {
 }
 
 /// One update a `VoiceSessionDriver` reports as a session progresses: the transcript
-/// becomes available first (as speech is recognized), then the full `result` once
-/// dispatch/routing completes (docs/04-hld.md §13; User Stories 2, 39, 40, 41).
+/// becomes available first (as speech is recognized), then a structured outcome
+/// (docs/04-hld.md §13; User Stories 2, 39, 40, 41). Terminal outcomes are `.result`,
+/// `.confirmBack`, `.promptBack`, or `.hardBlocked`.
 public enum VoiceSessionUpdate: Equatable, Sendable {
     case transcript(String)
     case result(VoiceSessionResult)
+    case confirmBack(ConfirmBackInfo)
+    case promptBack(String, String?)
+    case hardBlocked(String, String)
 }
 
 /// The seam (specs/P1 §"Architectural decisions" — "P1 depends only on `AideCore`
@@ -42,9 +46,13 @@ public enum VoiceSessionUpdate: Equatable, Sendable {
 /// One session is in flight at a time, driven by push-to-talk (docs/05-lld.md §10):
 /// - `begin(mode:)` — PTT down: start capturing for `mode`.
 /// - `end()` — PTT up: the utterance is complete; the driver resolves asynchronously,
-///   delivering `.transcript` then `.result` through `onUpdate`.
+///   delivering `.transcript` then a terminal update through `onUpdate`. That
+///   terminal update may be `.result`, `.confirmBack`, `.promptBack`, or
+///   `.hardBlocked`.
 /// - `cancel()` — a new press interrupted this session before it resolved; any update
 ///   still in flight for it must not be delivered.
+/// - `approve()` / `reject()` — Confirm-Back: re-dispatch or drop the stashed intent
+///   (default no-ops; command-mode conformers override).
 ///
 /// `onUpdate` is always delivered on the **main actor** (docs/05-lld.md §10 —
 /// Concurrency), matching every other UI-facing callback in this codebase
@@ -52,16 +60,30 @@ public enum VoiceSessionUpdate: Equatable, Sendable {
 public protocol VoiceSessionDriver: AnyObject {
     /// Delivered on the main actor. The conformer is expected to have this set before
     /// its first `begin(mode:)` — `VoiceSessionCoordinator` sets it at construction.
+    /// After `end()`, may deliver `.transcript` then `.result`, `.confirmBack`,
+    /// `.promptBack`, or `.hardBlocked`.
     var onUpdate: ((VoiceSessionUpdate) -> Void)? { get set }
 
     /// Begin a session for `mode` (push-to-talk down).
     func begin(mode: VoiceSessionMode)
 
     /// End the current session (push-to-talk up); the driver reports its update(s)
-    /// asynchronously through `onUpdate`.
+    /// asynchronously through `onUpdate` (`.transcript` then `.result` /
+    /// `.confirmBack` / `.promptBack` / `.hardBlocked`).
     func end()
 
     /// Cancel the current session — a new press interrupted it mid-flight. No further
     /// `onUpdate` calls may fire for the cancelled session.
     func cancel()
+
+    /// Confirm-Back approved: re-dispatch the stashed intent, bypassing the gate.
+    func approve()
+
+    /// Confirm-Back rejected: drop the stashed intent without running it.
+    func reject()
+}
+
+extension VoiceSessionDriver {
+    public func approve() {}
+    public func reject() {}
 }

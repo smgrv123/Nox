@@ -47,6 +47,21 @@ let package = Package(
         // JSON/SSE parsing) is genuinely unit-testable headlessly against a `URLProtocol`
         // stub, so it stays in the fast `swift test` gate instead of being opt-in-only.
         .library(name: "InferenceClient", targets: ["InferenceClient"]),
+        // P4 Phase 1 · Skill/Automation Manifest model: the `Manifest` struct, `JSONValue`
+        // recursive enum, supporting types, and `ManifestValidation` (docs/05-lld.md §2.1).
+        .library(name: "SkillManifest", targets: ["SkillManifest"]),
+        // P4 Phase 2 · Skill Registry: GBNF grammar + prompt catalog from manifests.
+        .library(name: "SkillRegistry", targets: ["SkillRegistry"]),
+        // P4 Phase 3 · Router Contract v2 parse + logprob-derived routing confidence.
+        .library(name: "CommandRouter", targets: ["CommandRouter"]),
+        // P4 Phase 5 · Dispatcher: Confidence Gate + scanner + skill invocation.
+        .library(name: "CommandDispatcher", targets: ["CommandDispatcher"]),
+        // P4 Phase 6 · Built-in skill implementations. Pure skills are value-in →
+        // value-out; effectful skills call an injected `SystemSkillExecutor`.
+        .library(name: "BuiltinSkills", targets: ["BuiltinSkills"]),
+        // P4 Phase 7 · Command Mode pipeline: VoiceSessionDriver that routes →
+        // dispatches, plus the day-one CalibrationLogger JSONL harness (LLD §4.2).
+        .library(name: "CommandMode", targets: ["CommandMode"]),
     ],
     targets: [
         .target(name: "AideCore"),
@@ -173,6 +188,58 @@ let package = Package(
             name: "ModelDownloader",
             dependencies: ["ModelProvisioning"]
         ),
+        // P4 Phase 1 · Skill/Automation Manifest model + JSONValue + validation
+        // (docs/05-lld.md §2.1). Depends only on AideCore for `RiskTier`.
+        .target(
+            name: "SkillManifest",
+            dependencies: ["AideCore"]
+        ),
+        // P4 Phase 2 · loads/validates manifests, generates GBNF + router prompt catalog,
+        // validates Router-emitted parameters (docs/05-lld.md §3.1, §4.4).
+        .target(
+            name: "SkillRegistry",
+            dependencies: ["SkillManifest"]
+        ),
+        // P4 Phase 3 · Contract v2 parse + RoutingConfidence from TokenLogprob
+        // (docs/05-lld.md §2.2, §4.2). Depends on LLMRuntime protocols, never InferenceClient.
+        .target(
+            name: "CommandRouter",
+            dependencies: ["AideCore", "SkillManifest", "LLMRuntime"]
+        ),
+        // P4 Phase 5 · applies Confidence Gate, scans executable skills, invokes
+        // BuiltinSkillExecutor (docs/05-lld.md §3.1). Depends on seams, never App/.
+        .target(
+            name: "CommandDispatcher",
+            dependencies: [
+                "AideCore",
+                "CommandRouter",
+                "DangerousCommandScanner",
+                "SkillManifest",
+                "SkillRegistry",
+            ]
+        ),
+        // P4 Phase 6 · v1 built-in skills. No AppKit — effectful work goes through
+        // `SystemSkillExecutor` so the App layer injects NSWorkspace / notifications.
+        .target(
+            name: "BuiltinSkills",
+            dependencies: ["AideCore", "CommandDispatcher", "SkillManifest"]
+        ),
+        // P4 Phase 7 · Command Mode driver + calibration JSONL logger. Depends on
+        // seams (STTEngine, Routing, Dispatching) and Persistence.FileAppender —
+        // never InferenceClient, WhisperSTTEngine, or AppKit.
+        .target(
+            name: "CommandMode",
+            dependencies: [
+                "AideCore",
+                "CommandDispatcher",
+                "CommandRouter",
+                "LLMRuntime",
+                "Persistence",
+                "SkillManifest",
+                "SkillRegistry",
+                "SpeechToText",
+            ]
+        ),
         // P2b Phase 4 · the pure LLM-runtime heart, playing the role `SpeechToText`
         // played for P2a: `LlmTierPolicy` (Tier → Qwen `ModelDescriptor`) today; the
         // `LLMClient`/`SidecarController` seams, backoff schedule, and idle-unload state
@@ -279,6 +346,58 @@ let package = Package(
         .testTarget(
             name: "InferenceClientTests",
             dependencies: ["InferenceClient", "LLMRuntime"]
+        ),
+        // P4 Phase 1 · Headless unit suite for the Manifest model, JSONValue recursive
+        // enum, and ManifestValidation: round-trip encoding, fixture decoding, and
+        // defensive rejection of malformed manifests.
+        .testTarget(
+            name: "SkillManifestTests",
+            dependencies: ["SkillManifest", "AideCore"],
+            resources: [.copy("Fixtures")]
+        ),
+        .testTarget(
+            name: "SkillRegistryTests",
+            dependencies: ["SkillRegistry", "SkillManifest", "AideCore"]
+        ),
+        .testTarget(
+            name: "CommandRouterTests",
+            dependencies: ["CommandRouter", "SkillManifest", "LLMRuntime", "AideCore"]
+        ),
+        .testTarget(
+            name: "CommandDispatcherTests",
+            dependencies: [
+                "CommandDispatcher",
+                "CommandRouter",
+                "DangerousCommandScanner",
+                "SkillManifest",
+                "SkillRegistry",
+                "AideCore",
+            ]
+        ),
+        .testTarget(
+            name: "BuiltinSkillsTests",
+            dependencies: [
+                "BuiltinSkills",
+                "CommandDispatcher",
+                "SkillManifest",
+                "AideCore",
+            ],
+            resources: [.copy("Fixtures")]
+        ),
+        .testTarget(
+            name: "CommandModeTests",
+            dependencies: [
+                "CommandMode",
+                "AideCore",
+                "CommandDispatcher",
+                "CommandRouter",
+                "DangerousCommandScanner",
+                "LLMRuntime",
+                "Persistence",
+                "SkillManifest",
+                "SkillRegistry",
+                "SpeechToText",
+            ]
         ),
     ]
 )

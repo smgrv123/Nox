@@ -4,10 +4,11 @@ import XCTest
 @testable import ModelProvisioning
 
 /// TDD for idle-unload behavior integrated into `SidecarLifecycleController` (plan
-/// Phase 6; LLD §5.4; User Stories 16, 17, 18). These tests verify that the lifecycle
-/// engine, when configured with a `Tier`, applies `IdleUnloadPolicy` during its
-/// ready-poll loop — stopping cleanly (`.stopped`, not `.failed`) when the 8GB tier's
-/// idle threshold is exceeded, and never stopping for 16GB.
+/// Phase 6; LLD §5.4, updated by a deliberate policy change superseding the prior "16GB
+/// always resident" spec; User Stories 16, 17, 18). These tests verify that the
+/// lifecycle engine, when configured with a `Tier`, applies `IdleUnloadPolicy` during
+/// its ready-poll loop — stopping cleanly (`.stopped`, not `.failed`) when either
+/// tier's own idle threshold is exceeded.
 ///
 /// Reuses the same `FakeSidecarProcessSource`/`FakeSidecarTiming`/`StateRecorder`
 /// fixtures from `SidecarLifecycleControllerFixtures.swift`.
@@ -78,9 +79,9 @@ final class IdleUnloadLifecycleTests: XCTestCase {
         await engine.stop()
     }
 
-    // MARK: - 16GB tier: never idle-unloads
+    // MARK: - 16GB tier: idle-unloads after its own threshold
 
-    func testTier16GBNeverIdleUnloads() async throws {
+    func testTier16GBIdleUnloadsAfterThreshold() async throws {
         let source = FakeSidecarProcessSource(
             launchOutcomes: [.succeed(port: 6000)], healthOutcomes: [true])
         let timing = FakeSidecarTiming()
@@ -88,19 +89,57 @@ final class IdleUnloadLifecycleTests: XCTestCase {
         let engine = SidecarLifecycleController(
             processSource: source,
             timing: timing,
-            readyPollInterval: 100,
+            readyPollInterval: 10,
             tier: .tier16GB,
-            idleUnloadThreshold: 50,
+            idleUnloadThreshold: 25,
             onStateChange: { [recorder] state in recorder.record(state) })
 
         try await engine.startIfNeeded(model: .fixture)
 
-        let events = await recorder.wait(untilCountAtLeast: 2)
-        XCTAssertEqual(events.first, .launching)
-        XCTAssertEqual(events.last, .ready(port: 6000))
+        let events = await recorder.wait { events in
+            if case .stopped = events.last { return true }
+            return false
+        }
 
-        let state = await engine.state
-        XCTAssertEqual(state, .ready(port: 6000), "16GB tier must never idle-unload")
+        XCTAssertEqual(events.first, .launching)
+        XCTAssertTrue(events.contains(.ready(port: 6000)))
+        XCTAssertEqual(events.last, .stopped, "16GB tier must idle-unload to .stopped")
+
+        let finalState = await engine.state
+        XCTAssertEqual(finalState, .stopped)
+    }
+
+    // MARK: - 16GB tier: activity resets idle timer, stays resident
+
+    func testTier16GBActivityResetsIdleTimerStaysResident() async throws {
+        let source = FakeSidecarProcessSource(
+            launchOutcomes: [.succeed(port: 6000)], healthOutcomes: [true])
+        let recorder = StateRecorder()
+
+        // readyPollInterval (5s) << idleUnloadThreshold (100s): even in the worst case
+        // (the first poll fires before the test's recordActivity() runs), the idle
+        // interval after one poll is only 5s — well under the 100s threshold. After
+        // recordActivity(), every subsequent idle check sees at most 5s since last
+        // activity, so the engine stays resident through many iterations.
+        let engine = SidecarLifecycleController(
+            processSource: source,
+            timing: FakeSidecarTiming(),
+            readyPollInterval: 5,
+            tier: .tier16GB,
+            idleUnloadThreshold: 100,
+            onStateChange: { [recorder] state in recorder.record(state) })
+
+        try await engine.startIfNeeded(model: .fixture)
+
+        _ = await recorder.wait(untilCountAtLeast: 2)
+
+        await engine.recordActivity()
+
+        let reachedReady = await pollUntil {
+            if case .ready = await engine.state { return true }
+            return false
+        }
+        XCTAssertTrue(reachedReady, "activity should keep the Sidecar in .ready state")
 
         await engine.stop()
     }

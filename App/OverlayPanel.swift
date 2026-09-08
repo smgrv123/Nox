@@ -34,6 +34,11 @@ final class OverlayController: ObservableObject {
     /// result.
     @Published private(set) var result: String?
 
+    /// Confirm-Back button actions. Wired by `AppCoordinator` to
+    /// `voiceSession.approveConfirmBack()` / `rejectConfirmBack()`.
+    var onApprove: (() -> Void)?
+    var onReject: (() -> Void)?
+
     /// Whether to render the Local/Cloud indicator badge (Phase 9; User Stories 29,
     /// 30). Mirrors `settings.indicators.showLocalCloudIndicator`; `AppCoordinator`
     /// keeps it in sync via `applyIndicatorSettings` on load and on every persisted
@@ -99,11 +104,39 @@ final class OverlayController: ObservableObject {
 
     /// Reflect `machine.state` into the published state and the panel's visibility.
     private func syncToState() {
+        let previousState = state
         state = machine.state
         if state.isVisible {
             showPanel()
+            applyPointerPolicy(state, previousState: previousState)
         } else {
             panel?.orderOut(nil)
+            applyPointerPolicy(.hidden, previousState: previousState)
+        }
+    }
+
+    /// Confirm-Back needs clicks (Approve / Reject). Other Overlay states must stay
+    /// click-through so Dictation never steals the frontmost app's mouse.
+    ///
+    /// On every exit from `.confirmBack` (approve, reject, or any future dismiss/
+    /// timeout path — all funnel through `syncToState`), the panel must actually
+    /// **resign** key-window status, not merely flip `acceptsKeyFocus` to `false`:
+    /// AppKit does not resign a window's key status just because `canBecomeKey`
+    /// changes, so without this the panel could remain the key window through the
+    /// result display and swallow the user's keystrokes in whatever app they're
+    /// really typing into.
+    private func applyPointerPolicy(_ state: OverlayState, previousState: OverlayState) {
+        guard let overlayPanel = panel as? NonActivatingOverlayPanel else { return }
+        let confirm = state == .confirmBack
+        overlayPanel.ignoresMouseEvents = !confirm
+        if confirm {
+            overlayPanel.acceptsKeyFocus = true
+            overlayPanel.makeKeyAndOrderFront(nil)
+        } else {
+            overlayPanel.acceptsKeyFocus = false
+            if previousState == .confirmBack, overlayPanel.isKeyWindow {
+                overlayPanel.resignKey()
+            }
         }
     }
 
@@ -132,7 +165,7 @@ final class OverlayController: ObservableObject {
         created.backgroundColor = .clear
         created.isOpaque = false
         created.hasShadow = false  // the SwiftUI card draws its own shadow
-        created.ignoresMouseEvents = true  // Phase 4 renders visuals only; no controls yet
+        created.ignoresMouseEvents = true
         // Ride across Spaces and over full-screen apps without ever activating.
         created.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
         panel = created
@@ -158,9 +191,12 @@ final class OverlayController: ObservableObject {
     }
 }
 
-/// An `NSPanel` that can **never** become key or main, so showing it never pulls
-/// keyboard focus away from the user's frontmost app (docs/04-hld.md §13.1).
+/// Overlay panel: click-through and non-key except during Confirm-Back, when
+/// Approve / Reject must receive mouse and key events.
 final class NonActivatingOverlayPanel: NSPanel {
-    override var canBecomeKey: Bool { false }
+    /// Confirm-Back buttons need key focus; every other Overlay state must not.
+    var acceptsKeyFocus = false
+
+    override var canBecomeKey: Bool { acceptsKeyFocus }
     override var canBecomeMain: Bool { false }
 }

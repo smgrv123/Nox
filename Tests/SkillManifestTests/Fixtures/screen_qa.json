@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "screen_qa",
+  "kind": "builtin",
+  "display_name": "Screen Q&A",
+  "description": "Answer a question about what is currently visible on the user's screen.",
+  "utterance_examples": ["what's on my screen", "read the error message", "summarize what I'm looking at"],
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["question"],
+    "properties": {
+      "question": { "type": "string", "minLength": 1, "maxLength": 2000 }
+    }
+  },
+  "permissions": { "network": false, "requires": ["screen_recording"] },
+  "schedule": null,
+  "risk_tier": "low",
+  "enabled": true,
+  "script_ref": null,
+  "generated_by": "builtin"
+}
