@@ -63,14 +63,27 @@ Speak a command; a built-in skill runs.
 | **Done =** | "open Safari" → routes → executes; prompt-back and Confirm-Back paths both work. |
 
 ### P5 · Dictation
-The hero feature: talk into any app, cleaned up.
+The hero feature: talk into any app, cleaned up. Split into **P5a · Dictation Core** and **P5b · Personalization Dictionary** (same split as P2a/P2b). Specs: [`specs/P5a-dictation-core.md`](../specs/P5a-dictation-core.md), [`specs/P5b-personalization-dictionary.md`](../specs/P5b-personalization-dictionary.md). Plans: [`plans/P5a-dictation-core.md`](../plans/P5a-dictation-core.md), [`plans/P5b-personalization-dictionary.md`](../plans/P5b-personalization-dictionary.md).
+
+### P5a · Dictation Core
+Hold ⌃Space → transcribe → optional tone cleanup → insert at the caret.
 
 | | |
 |---|---|
-| **Contains** | Hotkey B capture → transcribe → single **tone-aware cleanup pass** (**Tone Presets**) → **Text Insertion** (AX-first, clipboard-paste fallback, clipboard restore, terminal detection) → **Personalization Dictionary** ("correct that", Whisper bias prompt, cleanup pairs). |
-| **HLD / LLD** | HLD §9, §15.2; LLD §2.3, §4.5–4.7 |
-| **Depends on** | **P1, P2** (+ **P3** for terminal-destination dictation) |
-| **Done =** | Dictate into a standard app and into a terminal — cleaned, inserted, with the destination-aware scan on terminal input. |
+| **Contains** | Hotkey B capture → transcribe → single **tone-aware cleanup pass** (**Tone Presets**) → **Text Insertion** (AX-first, clipboard-paste fallback, clipboard restore, terminal-destination scan via P3 C11) → Settings (`tone`, `dictation.cleanup_enabled`, `text_insertion.app_overrides`) → raw bypass when the sidecar is not ready. |
+| **HLD / LLD** | HLD §9, §18.2; LLD §2.5, §3.5, §4.6–4.7, §6.3, §8–10 |
+| **Depends on** | **P1, P2, P3** (P4 merged to `main` but not a logic dependency) |
+| **Done =** | Dictate into a standard app and into a terminal — cleaned (or raw on bypass), inserted, with Confirm-Back on terminal input. |
+
+### P5b · Personalization Dictionary
+Explicit-only vocabulary store consumed by Whisper and cleanup.
+
+| | |
+|---|---|
+| **Contains** | `dictionary.json` (LLD §2.3) + MRU cap 500; **"correct that"** builtin skill; Whisper **bias prompt** (real tokenizer, 200-token budget, merged with P4 app-name bias); cleanup-prompt **substitution** list (top 40); Dictionary Settings pane. |
+| **HLD / LLD** | HLD §9.3, §15.2; LLD §2.3, §4.5, §6.3 |
+| **Depends on** | **P4** (registry/GBNF/executor), **P5a** (prompt slots) |
+| **Done =** | "correct that: X should be Y" → next dictation is biased and substitutions apply; wipe-history spares the dictionary. |
 
 ### P6 · Assistant Intelligence
 Ask about the world and about the screen.
@@ -121,4 +134,6 @@ Each pillar gets, in order:
 | P2 Inference Core | **Complete** — P2a · Speech-to-Text (all 5 phases) + P2b · LLM Runtime (all 6 phases) shipped |
 | P3 Safety Guard | **Complete** — all 6 phases shipped (`plans/P3-safety-guard.md`); recursive-descent scanner with 370 tests |
 | P4 Command Routing & Skills | **Complete** — headless Phases 1–7 (`plans/P4-command-routing-and-skills.md`) plus app-wiring Phases 1–6 (`plans/P4-app-wiring.md`) |
-| P5, P6, P7 | Not started |
+| P5a Dictation Core | **Spec + plan authored** — implementation not started (`plans/P5a-dictation-core.md`) |
+| P5b Personalization Dictionary | **Spec + plan authored** — implementation not started (`plans/P5b-personalization-dictionary.md`); execute after P5a |
+| P6, P7 | Not started |
