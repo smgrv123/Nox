@@ -62,6 +62,9 @@ let package = Package(
         // P4 Phase 7 · Command Mode pipeline: VoiceSessionDriver that routes →
         // dispatches, plus the day-one CalibrationLogger JSONL harness (LLD §4.2).
         .library(name: "CommandMode", targets: ["CommandMode"]),
+        // P5a · Dictation Core: insertion planner + DictationDriver (capture →
+        // transcribe → insert). AppKit/AX lives in App/TextInserterLive.swift.
+        .library(name: "Dictation", targets: ["Dictation"]),
     ],
     targets: [
         .target(name: "AideCore"),
@@ -240,6 +243,12 @@ let package = Package(
                 "SpeechToText",
             ]
         ),
+        // P5a · Dictation Core — planner + VoiceSessionDriver that inserts at the
+        // caret. No AppKit; the live inserter is App/TextInserterLive.swift.
+        .target(
+            name: "Dictation",
+            dependencies: ["AideCore", "SpeechToText"]
+        ),
         // P2b Phase 4 · the pure LLM-runtime heart, playing the role `SpeechToText`
         // played for P2a: `LlmTierPolicy` (Tier → Qwen `ModelDescriptor`) today; the
         // `LLMClient`/`SidecarController` seams, backoff schedule, and idle-unload state
@@ -398,6 +407,10 @@ let package = Package(
                 "SkillRegistry",
                 "SpeechToText",
             ]
+        ),
+        .testTarget(
+            name: "DictationTests",
+            dependencies: ["Dictation", "AideCore", "SpeechToText"]
         ),
     ]
 )

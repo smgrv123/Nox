@@ -102,12 +102,12 @@ Do **not** unit-test `TextInserterLive`.
 
 ### Acceptance criteria
 
-- [ ] `Dictation` module + tests registered; `just gen` run after `project.yml` change.
-- [ ] Named tests above exist and pass via `swift test`.
-- [ ] Mux dictation inner driver is `DictationDriver`; command path unchanged.
-- [ ] `TextInserterLive` compiles in the app target (`just app`).
+- [x] `Dictation` module + tests registered; `just gen` run after `project.yml` change.
+- [x] Named tests above exist and pass via `swift test`.
+- [x] Mux dictation inner driver is `DictationDriver`; command path unchanged.
+- [x] `TextInserterLive` compiles in the app target (`just app`).
 - [ ] Manual: hold ⌃Space in TextEdit, speak, raw text at caret (or Overlay-only if AX not granted — then paste fallback should still land).
-- [ ] Per-phase gate green.
+- [x] Per-phase gate green.
 
 ---
 
