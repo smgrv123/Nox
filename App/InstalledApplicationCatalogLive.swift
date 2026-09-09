@@ -21,7 +21,8 @@ struct InstalledApplicationCatalogLive: InstalledApplicationCatalog {
     }
 
     private static func applications(inRoot root: String, isSystemUtility: Bool)
-        -> [InstalledApplication] {
+        -> [InstalledApplication]
+    {
         let rootURL = URL(fileURLWithPath: root)
         guard
             let entries = try? FileManager.default.contentsOfDirectory(
