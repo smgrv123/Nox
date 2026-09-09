@@ -81,9 +81,21 @@ public protocol VoiceSessionDriver: AnyObject {
 
     /// Confirm-Back rejected: drop the stashed intent without running it.
     func reject()
+
+    /// Confirm-Back's safety-net timeout fired — the user answered neither Approve
+    /// nor Reject in time (docs/04-hld.md §13.1; `VoiceSessionCoordinator
+    /// .scheduleConfirmBackTimeoutToIdle`). The safety guarantee is identical to an
+    /// explicit `reject()`: the stashed intent must never run. Most conformers have
+    /// no reason to treat this differently from `reject()` — the default forwards to
+    /// it. `DictationDriver` overrides this: silently dropping dictated text the user
+    /// never got a chance to approve *or* reject is its own failure mode (the text is
+    /// gone either way), so it copies the stashed text to the clipboard instead of
+    /// just discarding it, without ever inserting it.
+    func confirmBackTimedOut()
 }
 
 extension VoiceSessionDriver {
     public func approve() {}
     public func reject() {}
+    public func confirmBackTimedOut() { reject() }
 }

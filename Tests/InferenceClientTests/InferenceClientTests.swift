@@ -13,7 +13,7 @@ import XCTest
 /// binary (`b10332`) during this phase's development — see `ChatCompletionWireTypes.swift`.
 final class InferenceClientTests: XCTestCase {
 
-    private let localEndpoint = LLMEndpoint(
+    let localEndpoint = LLMEndpoint(
         baseURL: URL(string: "http://127.0.0.1:5555")!, model: "qwen-test.gguf", isLocal: true)
 
     override func setUpWithError() throws {
@@ -24,13 +24,17 @@ final class InferenceClientTests: XCTestCase {
         StubURLProtocol.reset()
     }
 
-    private func makeSession() -> URLSession {
+    // Not `private`: `InferenceClientTests+ThinkingOptOut.swift` calls these from an
+    // extension in another file — `private` is file-scoped in Swift and would not be
+    // visible there. Mirrors `Tests/DictationTests/TestSupport.swift`'s use of
+    // default-access helpers for the same cross-file reason.
+    func makeSession() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [StubURLProtocol.self]
         return URLSession(configuration: configuration)
     }
 
-    private func capturedRequestBody(_ request: URLRequest) -> [String: Any] {
+    func capturedRequestBody(_ request: URLRequest) -> [String: Any] {
         guard let body = request.httpBodyStreamData() ?? request.httpBody,
             let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any]
         else { return [:] }
@@ -147,7 +151,13 @@ final class InferenceClientTests: XCTestCase {
         XCTAssertEqual(requestBody["stream"] as? Bool, false)
         XCTAssertNil(requestBody["grammar"], "chat must never send a grammar")
         XCTAssertEqual(requestBody["top_logprobs"] as? Int, 2)
+        XCTAssertNil(
+            requestBody["chat_template_kwargs"],
+            "a caller that doesn't opt out of thinking must omit the key entirely, not send it as some default value")
     }
+
+    // Per-request thinking opt-out (`chat_template_kwargs`) tests live in
+    // InferenceClientTests+ThinkingOptOut.swift.
 
     // MARK: - chat: streamed → multiple chunks, cumulative byte ranges, [DONE] terminates
 

@@ -26,8 +26,7 @@ final class DictationDriverTests: XCTestCase {
         driver.end()
         await fulfillment(of: [resolved], timeout: 2)
 
-        XCTAssertEqual(inserter.inserted.map(\.text), ["hello world"])
-        XCTAssertEqual(inserter.inserted.map(\.plan), [.axThenPaste])
+        XCTAssertEqual(inserter.inserted, ["hello world"])
         XCTAssertEqual(
             updates,
             [
@@ -39,32 +38,11 @@ final class DictationDriverTests: XCTestCase {
             ])
     }
 
-    func testPasteOverrideInsertsWithPasteOnly() async {
-        let capture = FakeCaptureBuffer(finalizeReturns: dictationTestPCM)
-        let inserter = RecordingInserter()
-        let driver = makeDictationDriver(
-            engine: MockSTTEngine(returning: passingTranscription()),
-            capture: capture,
-            inserter: inserter,
-            overrides: { ["com.apple.TextEdit": .paste] })
-
-        let resolved = expectation(description: "result delivered")
-        driver.onUpdate = { if case .result = $0 { resolved.fulfill() } }
-
-        driver.begin(mode: .dictation)
-        driver.end()
-        await fulfillment(of: [resolved], timeout: 2)
-
-        XCTAssertEqual(inserter.inserted.count, 1)
-        XCTAssertEqual(inserter.inserted.map(\.text), ["hello world"])
-        XCTAssertEqual(inserter.inserted.map(\.plan), [.pasteOnly])
-    }
-
     func testInsertFailedStillDeliversTranscriptWithCopyEscapeSummary() async {
         let capture = FakeCaptureBuffer(finalizeReturns: dictationTestPCM)
         let inserter = RecordingInserter()
         let failureReason = "AX insert failed"
-        inserter.result = .failed(reason: failureReason)
+        inserter.result = .failed(.pasteFailed(detail: failureReason))
         let driver = makeDictationDriver(
             engine: MockSTTEngine(returning: passingTranscription()),
             capture: capture,
@@ -81,8 +59,7 @@ final class DictationDriverTests: XCTestCase {
         driver.end()
         await fulfillment(of: [resolved], timeout: 2)
 
-        XCTAssertEqual(inserter.inserted.map(\.text), ["hello world"])
-        XCTAssertEqual(inserter.inserted.map(\.plan), [.axThenPaste])
+        XCTAssertEqual(inserter.inserted, ["hello world"])
         XCTAssertEqual(inserter.copied, ["hello world"])
         XCTAssertEqual(
             updates,

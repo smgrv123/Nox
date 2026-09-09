@@ -62,6 +62,25 @@ struct MenubarMenu: View {
             Divider()
         }
 
+        // P5a fix-it: dictation pastes via a synthetic ⌘V, and macOS gives no reliable
+        // signal that the target app actually consumed it — a paste can silently fail
+        // while Aide still reports success. Rather than build unreliable verification,
+        // recovery is made trivial: put the last dictation's text back on the
+        // clipboard in one click. Disabled (not hidden) before the first dictation
+        // this launch, matching the existing convention for unavailable actions
+        // (`SettingsLink`/`Quit` are always enabled; this is the menu's first
+        // conditionally-disabled item, so it sets the pattern rather than following
+        // one).
+        Button("Copy Last Dictation") {
+            if let text = coordinator.lastDictationText {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(text, forType: .string)
+            }
+        }
+        .disabled(coordinator.lastDictationText == nil)
+
+        Divider()
+
         SettingsLink {
             Text("Settings…")
         }

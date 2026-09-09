@@ -52,6 +52,18 @@ final class AppCoordinator: ObservableObject {
     /// which also persist progress.
     @Published var onboardingFlow: OnboardingFlow?
 
+    /// The text of the most recently completed dictation — whatever was actually
+    /// inserted (or attempted): the cleaned text when cleanup ran, otherwise the raw
+    /// transcript. Set on every completed dictation turn (`appendHistory` in
+    /// `AppCoordinator+CommandMode.swift`'s `makeDictationDriver`, which runs on the
+    /// main actor via `DictationDriver.performInsert`). `nil` until the first
+    /// dictation this launch — the menubar's "Copy Last Dictation" item disables
+    /// itself on `nil` rather than reading `history/*.jsonl`, so recovery from a
+    /// silent-paste failure (Aide can't verify the target app consumed the
+    /// synthetic ⌘V) costs one click instead of opening a log file. Resets on
+    /// relaunch by design; the history file remains the durable record.
+    @Published private(set) var lastDictationText: String?
+
     let hotkeys = HotkeyManager()
     private let singleInstance = SingleInstanceGuard()
 
@@ -94,12 +106,17 @@ final class AppCoordinator: ObservableObject {
     /// How long `.showingResult` stays on screen before Phase 6's loop auto-hides it.
     static let resultDisplayDuration: TimeInterval = 2.5
 
-    /// How long Confirm-Back stays on screen before the safety-net timeout rejects it
-    /// automatically (PHASE 11; docs/04-hld.md §13.1). Deliberately much longer than
-    /// `resultDisplayDuration`: Confirm-Back asks the user to make an active decision
-    /// (Approve/Reject a dangerous command) rather than just read a passing result, so
-    /// it needs enough time to actually notice and respond before this net kicks in.
-    static let confirmBackTimeoutDuration: TimeInterval = 20
+    /// How long Confirm-Back stays on screen before the safety-net timeout fires
+    /// automatically (PHASE 11; P5a live-use fix; docs/04-hld.md §13.1). Deliberately
+    /// much longer than `resultDisplayDuration`: Confirm-Back asks the user to make an
+    /// active decision (Approve/Reject a dangerous command) rather than just read a
+    /// passing result, so it needs enough time to actually notice and respond before
+    /// this net kicks in — but it must not sit on screen forever either. 10s is the
+    /// balance: long enough to read "Confirm this action?" and click, short enough
+    /// that an unanswered prompt doesn't linger. Shared by Command Mode and
+    /// Dictation's Confirm-Back (both route through the one `VoiceSessionCoordinator`
+    /// in `setUpCommandMode()`) — a change here affects both.
+    static let confirmBackTimeoutDuration: TimeInterval = 10
 
     private let logger = Logger(subsystem: Build.bundleIdentifier, category: "Lifecycle")
 
@@ -343,6 +360,14 @@ final class AppCoordinator: ObservableObject {
     func updateSettings(_ mutate: (inout Settings) -> Void) {
         mutate(&settings)
         persistSettings()
+    }
+
+    /// Record the text of a just-completed dictation turn for `lastDictationText`
+    /// (menubar "Copy Last Dictation" recovery). Called by `appendHistory` in
+    /// `AppCoordinator+CommandMode.swift`'s `makeDictationDriver`, which can't write
+    /// `private(set)` state directly because it lives in a different file.
+    func recordDictationCompletion(_ text: String) {
+        lastDictationText = text
     }
 
     // MARK: - Permission fix-it (P7; User Stories 15, 26, 27)

@@ -19,7 +19,17 @@ public enum CleanupPromptBuilder {
             Tone: \(tone.instruction)
 
             Rules:
-            - Fix grammar, punctuation, and remove filler/false starts.
+            - Filler words and disfluencies ("um", "uh", "like", "you know"), false starts, and
+              accidental word repeats ("the the") are NEVER part of the user's intended wording —
+              delete them in every preset, including presets that otherwise preserve wording
+              verbatim.
+            - Punctuation is mandatory in every preset, including presets that preserve wording
+              verbatim: every sentence MUST end with terminal punctuation (. ? !), every sentence
+              MUST start with a capital letter, and obvious intra-sentence commas MUST be added.
+              Dictated speech contains NO punctuation at all — supplying it is part of the
+              cleanup job, not a change to the user's wording. Adding punctuation and
+              capitalization is NEVER "altering wording" and is NEVER optional, even when the
+              tone says to preserve wording exactly.
             - Do NOT add information or answer anything. Rewrite only.
             - Preserve the user's language mix (including Hindi / code-mixed English) unless the tone
               explicitly formalizes register; never translate.

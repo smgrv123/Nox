@@ -68,10 +68,7 @@ extension AppCoordinator {
                 try await Self.resolveLiveSidecarEndpoint(from: self)
             },
             tonePreset: { [weak self] in
-                Self.mapTonePreset(self?.settings.tone.defaultPreset ?? .asIs)
-            },
-            overrides: { [weak self] in
-                Self.mapInsertionOverrides(self?.settings.textInsertion.appOverrides ?? [:])
+                self?.settings.tone.defaultPreset ?? .asIs
             },
             cleanupEnabled: { [weak self] in
                 self?.settings.dictation.cleanupEnabled ?? true
@@ -79,10 +76,8 @@ extension AppCoordinator {
             sidecarReady: { [weak self] in
                 await self?.isDictationSidecarReady() ?? false
             },
-            recordOverride: { [weak self] bundleID, override in
-                self?.recordAppInsertionOverride(bundleID: bundleID, override: override)
-            },
             appendHistory: { [weak self] entry in
+                self?.recordDictationCompletion(entry.cleaned ?? entry.transcript)
                 guard let storage = self?.storage else { return }
                 try? HistoryLog(fileURL: storage.historyFile(for: Date())).append(entry)
             })
@@ -212,22 +207,6 @@ extension AppCoordinator {
         }
     }
 
-    /// Map Configuration's duplicated tone-preset enum onto Dictation's at the
-    /// App boundary so neither module imports the other.
-    private static func mapTonePreset(_ preset: Settings.TonePreset) -> Dictation.TonePreset {
-        Dictation.TonePreset(rawValue: preset.rawValue) ?? .asIs
-    }
-
-    /// Map Configuration's duplicated `ax`/`paste` enum onto Dictation's at the
-    /// App boundary so neither module imports the other.
-    private static func mapInsertionOverrides(
-        _ overrides: [String: Settings.InsertionOverride]
-    ) -> [String: AppInsertionOverride] {
-        Dictionary(
-            uniqueKeysWithValues: overrides.compactMap { bundleID, override in
-                AppInsertionOverride(rawValue: override.rawValue).map { (bundleID, $0) }
-            })
-    }
 }
 
 private enum LiveSidecarRouterError: LocalizedError {

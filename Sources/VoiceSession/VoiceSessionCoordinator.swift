@@ -211,16 +211,22 @@ public final class VoiceSessionCoordinator {
     }
 
     /// Safety net for Confirm-Back: if the user never taps Approve/Reject, this fires
-    /// and tears the session down the same way `rejectConfirmBack()` does. Guarded on
-    /// `emit(.dismiss)` succeeding, which naturally no-ops if the user already
-    /// approved/rejected before the timeout fired — the Overlay is no longer
-    /// `.confirmBack` by then, so the state machine refuses the transition.
+    /// and tears the session down. Guarded on `emit(.dismiss)` succeeding, which
+    /// naturally no-ops if the user already approved/rejected before the timeout
+    /// fired — the Overlay is no longer `.confirmBack` by then, so the state machine
+    /// refuses the transition.
+    ///
+    /// Calls `driver.confirmBackTimedOut()`, **not** `reject()` — a timeout is not the
+    /// same event as an explicit user Reject (a driver may need to react differently,
+    /// e.g. `DictationDriver` preserves the stashed text via the clipboard instead of
+    /// just dropping it). The safety guarantee — the stashed intent never runs — holds
+    /// either way; only what happens to the now-abandoned intent can differ.
     private func scheduleConfirmBackTimeoutToIdle() {
         scheduleConfirmBackTimeout { [weak self] in
             guard let self, self.awaitingConfirmBackResponse else { return }
             self.awaitingConfirmBackResponse = false
             guard self.emit(.dismiss) else { return }
-            self.driver.reject()
+            self.driver.confirmBackTimedOut()
             self.sessionInFlight = false
             self.reportStatus(.idle)
         }

@@ -26,11 +26,15 @@ extension DictationDriverTests {
         driver.end()
         await fulfillment(of: [resolved], timeout: 2)
 
-        XCTAssertEqual(inserter.inserted.map(\.text), ["Cleaned."])
+        XCTAssertEqual(inserter.inserted, ["Cleaned."])
         let chatCount = await llm.chatCallCount
         XCTAssertEqual(chatCount, 1)
         let params = await llm.lastSamplingParams
         XCTAssertEqual(params?.temperature, 0.2)
+        XCTAssertEqual(
+            params?.disableThinking, true,
+            "dictation cleanup must opt out of model-side reasoning — it's a short free-form"
+                + " completion where Qwen3's default thinking mode dwarfs the answer in latency")
     }
 
     func testCleanupFailureInsertsRaw() async {
@@ -56,7 +60,7 @@ extension DictationDriverTests {
         driver.end()
         await fulfillment(of: [resolved], timeout: 2)
 
-        XCTAssertEqual(inserter.inserted.map(\.text), ["hello world"])
+        XCTAssertEqual(inserter.inserted, ["hello world"])
         XCTAssertEqual(
             updates.last,
             .result(
@@ -87,7 +91,7 @@ extension DictationDriverTests {
         driver.end()
         await fulfillment(of: [resolved], timeout: 2)
 
-        XCTAssertEqual(inserter.inserted.map(\.text), ["hello world"])
+        XCTAssertEqual(inserter.inserted, ["hello world"])
         let chatCount = await llm.chatCallCount
         XCTAssertEqual(chatCount, 0)
         XCTAssertEqual(
@@ -116,7 +120,7 @@ extension DictationDriverTests {
         driver.end()
         await fulfillment(of: [resolved], timeout: 2)
 
-        XCTAssertEqual(inserter.inserted.map(\.text), ["hello world"])
+        XCTAssertEqual(inserter.inserted, ["hello world"])
         let chatCount = await llm.chatCallCount
         XCTAssertEqual(chatCount, 0, "dictation must never implicitly offload to a non-local endpoint")
     }

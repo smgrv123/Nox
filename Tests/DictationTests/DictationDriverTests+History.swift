@@ -31,13 +31,29 @@ extension DictationDriverTests {
         XCTAssertEqual(entry.transcript, "hello world")
         XCTAssertNil(entry.cleaned)
         XCTAssertFalse(entry.cleanupRan)
-        XCTAssertEqual(entry.insertion, "ax")
+        XCTAssertEqual(entry.insertion, .paste)
         XCTAssertEqual(entry.destinationBundleID, "com.apple.TextEdit")
+
+        // Latency instrumentation (P5a): no cleanup on this path, so cleanup_ms
+        // stays nil — every other stage ran and must be populated and non-negative.
+        let audioMs = try XCTUnwrap(entry.audioMs)
+        let sttMs = try XCTUnwrap(entry.sttMs)
+        let modelLoadMs = try XCTUnwrap(entry.modelLoadMs)
+        let insertMs = try XCTUnwrap(entry.insertMs)
+        let totalMs = try XCTUnwrap(entry.totalMs)
+        XCTAssertNil(entry.cleanupMs, "cleanup was skipped — cleanup_ms must be absent, not zero")
+        XCTAssertGreaterThanOrEqual(audioMs, 0)
+        XCTAssertGreaterThanOrEqual(sttMs, 0)
+        XCTAssertGreaterThanOrEqual(modelLoadMs, 0)
+        XCTAssertGreaterThanOrEqual(insertMs, 0)
+        XCTAssertGreaterThanOrEqual(
+            totalMs, sttMs + insertMs,
+            "total_ms spans capture-end → insert-complete, so it must cover at least stt + insert")
     }
 
     func testCopyEscapeAppendsCopiedHistory() async throws {
         let inserter = RecordingInserter()
-        inserter.result = .failed(reason: "Couldn't insert via Accessibility or paste.")
+        inserter.result = .failed(.pasteFailed(detail: "Couldn't insert via Accessibility or paste."))
         let history = RecordingHistorySink()
         let driver = makeDictationDriver(
             engine: MockSTTEngine(returning: passingTranscription()),
@@ -54,7 +70,7 @@ extension DictationDriverTests {
 
         let entry = try XCTUnwrap(history.entries.first)
         XCTAssertEqual(history.entries.count, 1)
-        XCTAssertEqual(entry.insertion, "copied")
+        XCTAssertEqual(entry.insertion, .copied)
         XCTAssertEqual(entry.transcript, "hello world")
     }
 
@@ -81,7 +97,14 @@ extension DictationDriverTests {
         XCTAssertEqual(entry.transcript, "hello world")
         XCTAssertEqual(entry.cleaned, "Cleaned.")
         XCTAssertTrue(entry.cleanupRan)
-        XCTAssertEqual(entry.insertion, "ax")
+        XCTAssertEqual(entry.insertion, .paste)
+
+        // Latency instrumentation (P5a): cleanup ran, so cleanup_ms must be present
+        // (not nil) and total_ms — capture-end through insert-complete — must cover it.
+        let cleanupMs = try XCTUnwrap(entry.cleanupMs, "cleanup ran — cleanup_ms must be populated")
+        let totalMs = try XCTUnwrap(entry.totalMs)
+        XCTAssertGreaterThanOrEqual(cleanupMs, 0)
+        XCTAssertGreaterThanOrEqual(totalMs, cleanupMs)
     }
 
     func testCleanupFailureRecordsCleanupRanHistory() async throws {
@@ -109,7 +132,7 @@ extension DictationDriverTests {
         XCTAssertEqual(entry.transcript, "hello world")
         XCTAssertNil(entry.cleaned)
         XCTAssertTrue(entry.cleanupRan, "chat was called; cleanupRan means ran, not succeeded")
-        XCTAssertEqual(entry.insertion, "ax")
+        XCTAssertEqual(entry.insertion, .paste)
     }
 
     func testSidecarNotReadyDoesNotRecordCleanupRan() async throws {
@@ -234,7 +257,7 @@ extension DictationDriverTests {
         let entry = try XCTUnwrap(history.entries.first)
         XCTAssertEqual(history.entries.count, 1)
         XCTAssertEqual(entry.transcript, "hello world")
-        XCTAssertEqual(entry.insertion, "ax")
+        XCTAssertEqual(entry.insertion, .paste)
         XCTAssertEqual(entry.destinationBundleID, "com.apple.Terminal")
     }
 }

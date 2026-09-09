@@ -77,9 +77,6 @@ public struct Settings: Equatable, Sendable, Codable {
     /// do not collide on the type name.
     public var dictation: DictationSettings
 
-    /// Per-app AX vs paste insertion overrides (LLD §2.5 `text_insertion`).
-    public var textInsertion: TextInsertion
-
     public init(
         hotkeys: Hotkeys = Hotkeys(),
         indicators: Indicators = Indicators(),
@@ -87,8 +84,7 @@ public struct Settings: Equatable, Sendable, Codable {
         onboarding: OnboardingProgress = OnboardingProgress(),
         modelTier: String? = nil,
         tone: Tone = Tone(),
-        dictation: DictationSettings = DictationSettings(),
-        textInsertion: TextInsertion = TextInsertion()
+        dictation: DictationSettings = DictationSettings()
     ) {
         self.schemaVersion = Settings.currentSchemaVersion
         self.hotkeys = hotkeys
@@ -98,7 +94,6 @@ public struct Settings: Equatable, Sendable, Codable {
         self.modelTier = modelTier
         self.tone = tone
         self.dictation = dictation
-        self.textInsertion = textInsertion
     }
 
     /// The safe defaults used for a missing or unreadable file (User Story 38: a
@@ -114,7 +109,16 @@ public struct Settings: Equatable, Sendable, Codable {
         case modelTier = "model_tier"
         case tone
         case dictation
-        case textInsertion = "text_insertion"
+        // Note: no `textInsertion` case — the per-app AX/paste override machinery
+        // was removed (AX insertion no longer exists; dictation always pastes). This
+        // was a deliberate choice not to bump the schema version for the removal. A
+        // `text_insertion` key left over in an existing v6 `settings.json` is simply
+        // unrecognized JSON at decode time — Foundation's `JSONDecoder` silently
+        // ignores keys with no matching `CodingKeys` case, so old files with that
+        // block still decode without error. But `encode(to:)` is synthesised from
+        // these `CodingKeys`, so the next `persistSettings()` rewrites the file
+        // without the block — it's dropped, not preserved. That's harmless: nothing
+        // reads it either way.
     }
 
     public init(from decoder: Decoder) throws {
@@ -131,8 +135,6 @@ public struct Settings: Equatable, Sendable, Codable {
         self.tone = try container.decodeIfPresent(Tone.self, forKey: .tone) ?? Tone()
         self.dictation =
             try container.decodeIfPresent(DictationSettings.self, forKey: .dictation) ?? DictationSettings()
-        self.textInsertion =
-            try container.decodeIfPresent(TextInsertion.self, forKey: .textInsertion) ?? TextInsertion()
     }
     // `encode(to:)` is synthesised from `CodingKeys` — writes every block above.
 }

@@ -32,7 +32,7 @@ extension DictationDriverTests {
         driver.end()
         await fulfillment(of: [resolved], timeout: 2)
 
-        XCTAssertEqual(inserter.inserted.map(\.text), ["hello world"])
+        XCTAssertEqual(inserter.inserted, ["hello world"])
         let chatCount = await llm.chatCallCount
         XCTAssertEqual(chatCount, 0, "cleanup disabled must never call the LLM")
         XCTAssertEqual(
@@ -64,7 +64,7 @@ extension DictationDriverTests {
         driver.end()
         await fulfillment(of: [resolved], timeout: 2)
 
-        XCTAssertEqual(inserter.inserted.map(\.text), ["hello world"])
+        XCTAssertEqual(inserter.inserted, ["hello world"])
         let chatCount = await llm.chatCallCount
         XCTAssertEqual(chatCount, 0)
         XCTAssertEqual(
@@ -96,7 +96,7 @@ extension DictationDriverTests {
         driver.end()
         await fulfillment(of: [resolved], timeout: 2)
 
-        XCTAssertEqual(inserter.inserted.map(\.text), ["hello world"])
+        XCTAssertEqual(inserter.inserted, ["hello world"])
         let chatCount = await llm.chatCallCount
         XCTAssertEqual(chatCount, 0, "cold sidecar must not block on chat")
         XCTAssertEqual(
@@ -105,6 +105,76 @@ extension DictationDriverTests {
                 VoiceSessionResult(
                     transcript: "hello world",
                     summary: "Inserted raw — language model wasn't ready.")))
+    }
+
+    func testSidecarNotReadySummaryWinsOverAccessibilityDenied() async {
+        let llm = MockLLMClient()
+        await llm.setChatChunks(.success([ChatCompletionChunk(delta: "Cleaned.", isFinal: true)]))
+        let inserter = RecordingInserter()
+        inserter.focus = InsertionFocus(bundleID: "com.apple.TextEdit", accessibilityTrusted: false)
+        inserter.result = .insertedViaPaste
+        var updates: [VoiceSessionUpdate] = []
+        let driver = makeDictationDriver(
+            engine: MockSTTEngine(returning: passingTranscription()),
+            capture: FakeCaptureBuffer(finalizeReturns: dictationTestPCM),
+            inserter: inserter,
+            llm: llm,
+            resolveEndpoint: { dictationTestEndpoint() },
+            sidecarReady: { false })
+
+        let resolved = expectation(description: "result delivered")
+        driver.onUpdate = { update in
+            updates.append(update)
+            if case .result = update { resolved.fulfill() }
+        }
+
+        driver.begin(mode: .dictation)
+        driver.end()
+        await fulfillment(of: [resolved], timeout: 2)
+
+        let chatCount = await llm.chatCallCount
+        XCTAssertEqual(chatCount, 0, "cold sidecar must not block on chat")
+        XCTAssertEqual(
+            updates.last,
+            .result(
+                VoiceSessionResult(
+                    transcript: "hello world",
+                    summary: DictationDriver.sidecarNotReadySummary)),
+            "the reason we inserted raw text must not be silently overridden by the AX-denied copy")
+    }
+
+    func testCleanupFailedSummaryWinsOverAccessibilityDenied() async throws {
+        struct InjectedError: Error {}
+        let llm = MockLLMClient()
+        await llm.setChatChunks(.failure(InjectedError()))
+        let inserter = RecordingInserter()
+        inserter.focus = InsertionFocus(bundleID: "com.apple.TextEdit", accessibilityTrusted: false)
+        inserter.result = .insertedViaPaste
+        var updates: [VoiceSessionUpdate] = []
+        let driver = makeDictationDriver(
+            engine: MockSTTEngine(returning: passingTranscription()),
+            capture: FakeCaptureBuffer(finalizeReturns: dictationTestPCM),
+            inserter: inserter,
+            llm: llm,
+            resolveEndpoint: { dictationTestEndpoint() })
+
+        let resolved = expectation(description: "result delivered")
+        driver.onUpdate = { update in
+            updates.append(update)
+            if case .result = update { resolved.fulfill() }
+        }
+
+        driver.begin(mode: .dictation)
+        driver.end()
+        await fulfillment(of: [resolved], timeout: 2)
+
+        XCTAssertEqual(
+            updates.last,
+            .result(
+                VoiceSessionResult(
+                    transcript: "hello world",
+                    summary: DictationDriver.cleanupFailedSummary)),
+            "the reason we inserted raw text must not be silently overridden by the AX-denied copy")
     }
 
     func testPrefixSelectsProfessionalInstruction() async {
@@ -126,7 +196,7 @@ extension DictationDriverTests {
         driver.end()
         await fulfillment(of: [resolved], timeout: 2)
 
-        XCTAssertEqual(inserter.inserted.map(\.text), ["Cleaned."])
+        XCTAssertEqual(inserter.inserted, ["Cleaned."])
         let messages = await llm.lastChatMessages
         let userContent = messages?.first(where: { $0.role == .user })?.content ?? ""
         XCTAssertTrue(

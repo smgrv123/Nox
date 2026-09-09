@@ -11,12 +11,14 @@ final class FakeVoiceSessionDriver: VoiceSessionDriver {
     private(set) var cancelCallCount = 0
     private(set) var approveCallCount = 0
     private(set) var rejectCallCount = 0
+    private(set) var confirmBackTimedOutCallCount = 0
 
     func begin(mode: VoiceSessionMode) { beginCalls.append(mode) }
     func end() { endCallCount += 1 }
     func cancel() { cancelCallCount += 1 }
     func approve() { approveCallCount += 1 }
     func reject() { rejectCallCount += 1 }
+    func confirmBackTimedOut() { confirmBackTimedOutCallCount += 1 }
     func fire(_ update: VoiceSessionUpdate) { onUpdate?(update) }
 }
 

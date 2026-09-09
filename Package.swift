@@ -84,7 +84,7 @@ let package = Package(
         // raw Data); the load/save façade layers on Persistence's AtomicFileWriter.
         .target(
             name: "Configuration",
-            dependencies: ["Persistence"]
+            dependencies: ["Persistence", "AideCore"]
         ),
         // Pure Overlay state machine (docs/04-hld.md §13.1): Hidden ↔ Listening ↔
         // Processing ↔ ShowingResult / PromptBack / ConfirmBack, with illegal
@@ -137,6 +137,12 @@ let package = Package(
         // Depends only on `AideCore` for the shared `VoiceSessionMode` (command = strict /
         // dictation = lenient) the Pre-Gate is parameterized by — the canonical vocabulary,
         // not a parallel enum.
+        //
+        // P5a · also home to `CaptureTranscribeGate`, the shared capture → transcribe →
+        // Pre-Gate front half of every real `VoiceSessionDriver`. It lives here (not in
+        // `STTVoiceSession`) so `STTVoiceSession` (P2a) and `Dictation` (P5a) each depend
+        // on it without depending on each other's concrete pillar module — the seam rule
+        // in CLAUDE.md's "Independence via seams".
         .target(
             name: "SpeechToText",
             dependencies: ["AideCore", "ModelProvisioning"]
@@ -249,7 +255,9 @@ let package = Package(
         // Tone cleanup uses LLMRuntime's `LLMClient` seam (never InferenceClient).
         .target(
             name: "Dictation",
-            dependencies: ["AideCore", "SpeechToText", "DangerousCommandScanner", "LLMRuntime"]
+            dependencies: [
+                "AideCore", "SpeechToText", "DangerousCommandScanner", "LLMRuntime",
+            ]
         ),
         // P2b Phase 4 · the pure LLM-runtime heart, playing the role `SpeechToText`
         // played for P2a: `LlmTierPolicy` (Tier → Qwen `ModelDescriptor`) today; the

@@ -49,4 +49,8 @@ final class MuxVoiceSessionDriver: VoiceSessionDriver {
     func reject() {
         active?.reject()
     }
+
+    func confirmBackTimedOut() {
+        active?.confirmBackTimedOut()
+    }
 }

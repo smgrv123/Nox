@@ -1,17 +1,54 @@
 import AppKit
 import ApplicationServices
+import Carbon
 import Dictation
 import Foundation
 
-/// AppKit/AX shell for `TextInserting` (LLD §4.7). AX + synthetic ⌘V run on the
-/// main thread. Clipboard save/restore is best-effort and always attempted after
-/// paste so Aide does not silently clobber the pasteboard. Not unit-tested
-/// (`HotkeyManager` precedent); `just app` is the compile gate.
+/// AppKit shell for `TextInserting` (LLD §4.7 deviation: paste-only, not AX-first).
+/// AX insertion was removed — `AXUIElementSetAttributeValue(..., kAXSelectedTextAttribute,
+/// ...)` returns `.success` when the attribute write is *accepted*, not when text is
+/// actually inserted; Electron, Catalyst, and custom text views accept and discard
+/// it, so it had zero confirmed successes in real use. Synthetic ⌘V runs on the main
+/// thread. Clipboard save/restore is best-effort and always attempted after paste so
+/// Aide does not silently clobber the pasteboard. Not unit-tested (`HotkeyManager`
+/// precedent); `just app` is the compile gate.
+///
+/// Before posting the keystroke, `insert(_:)` checks `IsSecureEventInputEnabled()`
+/// (Carbon) — when macOS Secure Input is on (any password field focused anywhere on
+/// the system), synthetic keystrokes are silently discarded, so ⌘V can never work.
+/// Detecting that in advance means we return a failure without ever touching the
+/// user's clipboard, instead of clobbering it for a paste that was never going to
+/// land.
+///
+/// `AXIsProcessTrusted()` is still required — posting synthetic ⌘V needs Accessibility
+/// permission exactly as the removed AX write did — so `resolveFocus()` keeps
+/// reporting it.
 @MainActor
 final class TextInserterLive: TextInserting {
 
-    private static let pasteSettleNanoseconds: UInt64 = 80_000_000
+    /// How long to wait after posting synthetic ⌘V before restoring the user's
+    /// original clipboard. Posting ⌘V only *queues* the keystroke — the target app
+    /// reads the pasteboard asynchronously, on its own schedule — so this is a bet on
+    /// how long that takes. Too short and we restore before the target app has read
+    /// the dictated text, so the paste silently produces nothing (or re-pastes the
+    /// user's previous clipboard); too long and the user's clipboard sits clobbered
+    /// for longer than necessary. 300-500ms is the sane band; 400ms is the current
+    /// pick. Was 80ms (PROVISIONAL, never tuned) — an app under load, e.g. `xcodebuild`
+    /// running in the background, can easily exceed that, which is the leading
+    /// explanation for an observed silent paste failure in Ghostty.
+    private static let pasteSettleNanoseconds: UInt64 = 400_000_000
     private static let vKeyCode: CGKeyCode = 0x09
+
+    /// nspasteboard.org "concealed"/"transient" convention: honoured by Raycast,
+    /// Maccy, Alfred, Paste, and others as a signal to skip recording the pasteboard
+    /// item into clipboard history. Every dictation now transits the pasteboard, so
+    /// without this every dictated utterance would otherwise land permanently in
+    /// clipboard history. This is a convention, not enforcement — a manager that
+    /// doesn't honour it will still record the item.
+    private static let clipboardManagerSkipTypes: [NSPasteboard.PasteboardType] = [
+        NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"),
+        NSPasteboard.PasteboardType("org.nspasteboard.TransientType"),
+    ]
 
     func resolveFocus() async -> InsertionFocus {
         InsertionFocus(
@@ -19,22 +56,13 @@ final class TextInserterLive: TextInserting {
             accessibilityTrusted: AXIsProcessTrusted())
     }
 
-    func insert(_ text: String, plan: InsertionPlan) async -> InsertionResult {
-        switch plan {
-        case .axOnly:
-            return insertViaAX(text)
-                ? .insertedViaAX
-                : .failed(reason: "Couldn't insert via Accessibility.")
-        case .pasteOnly:
-            return await insertViaPaste(text)
-                ? .insertedViaPaste
-                : .failed(reason: "Couldn't paste.")
-        case .axThenPaste:
-            if insertViaAX(text) { return .insertedViaAX }
-            return await insertViaPaste(text)
-                ? .insertedViaPaste
-                : .failed(reason: "Couldn't insert via Accessibility or paste.")
+    func insert(_ text: String) async -> InsertionResult {
+        if IsSecureEventInputEnabled() {
+            return .failed(.secureInput)
         }
+        return await insertViaPaste(text)
+            ? .insertedViaPaste
+            : .failed(.pasteFailed(detail: "Couldn't paste."))
     }
 
     func copyToClipboard(_ text: String) async {
@@ -43,24 +71,11 @@ final class TextInserterLive: TextInserting {
         pasteboard.setString(text, forType: .string)
     }
 
-    private func insertViaAX(_ text: String) -> Bool {
-        guard AXIsProcessTrusted() else { return false }
-        let systemWide = AXUIElementCreateSystemWide()
-        var focused: CFTypeRef?
-        let copyError = AXUIElementCopyAttributeValue(
-            systemWide, kAXFocusedUIElementAttribute as CFString, &focused)
-        guard copyError == .success, let focused else { return false }
-        let element = unsafeBitCast(focused, to: AXUIElement.self)
-        let setError = AXUIElementSetAttributeValue(
-            element, kAXSelectedTextAttribute as CFString, text as CFTypeRef)
-        return setError == .success
-    }
-
     private func insertViaPaste(_ text: String) async -> Bool {
         let pasteboard = NSPasteboard.general
         let snapshot = Self.snapshot(pasteboard)
         pasteboard.clearContents()
-        let wrote = pasteboard.setString(text, forType: .string)
+        let wrote = Self.writeConcealed(text, to: pasteboard)
         guard wrote else {
             Self.restore(snapshot, onto: pasteboard)
             return false
@@ -71,6 +86,20 @@ final class TextInserterLive: TextInserting {
         }
         try? await Task.sleep(nanoseconds: Self.pasteSettleNanoseconds)
         return true
+    }
+
+    /// Writes `text` as the pasteboard's string content along with the clipboard-
+    /// manager skip markers, in one `declareTypes`/write batch — the markers must be
+    /// present on the same pasteboard-change event as the string so a manager
+    /// observing the change sees them together, not the string first and markers
+    /// added after.
+    private static func writeConcealed(_ text: String, to pasteboard: NSPasteboard) -> Bool {
+        let item = NSPasteboardItem()
+        item.setString(text, forType: .string)
+        for type in clipboardManagerSkipTypes {
+            item.setData(Data(), forType: type)
+        }
+        return pasteboard.writeObjects([item])
     }
 
     private static func snapshot(_ pasteboard: NSPasteboard) -> [[NSPasteboard.PasteboardType: Data]] {

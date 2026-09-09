@@ -20,6 +20,20 @@ struct ChatCompletionRequestBody: Encodable {
         let content: String
     }
 
+    /// llama-server's Jinja chat-template passthrough. `enable_thinking: false` opts a
+    /// single request out of Qwen3's hybrid reasoning mode — see `SamplingParams
+    /// .disableThinking`'s doc comment for the measured perf motivation. This nested DTO
+    /// only ever appears with that one key today; it exists as its own `Encodable` type
+    /// (rather than a raw dictionary) purely so `chatTemplateKwargs` can stay optional
+    /// and be omitted key-and-all via `encodeIfPresent` when unset.
+    struct ChatTemplateKwargs: Encodable {
+        let enableThinking: Bool
+
+        enum CodingKeys: String, CodingKey {
+            case enableThinking = "enable_thinking"
+        }
+    }
+
     let model: String
     let messages: [Message]
     let temperature: Double
@@ -29,12 +43,16 @@ struct ChatCompletionRequestBody: Encodable {
     let logprobs: Bool
     let topLogprobs: Int?
     let grammar: String?
+    /// `nil` omits `chat_template_kwargs` entirely — `routeComplete` and every `chat`
+    /// call that doesn't opt out of thinking must produce this exact shape, unchanged.
+    let chatTemplateKwargs: ChatTemplateKwargs?
 
     enum CodingKeys: String, CodingKey {
         case model, messages, temperature, stream, logprobs, grammar
         case topP = "top_p"
         case maxTokens = "max_tokens"
         case topLogprobs = "top_logprobs"
+        case chatTemplateKwargs = "chat_template_kwargs"
     }
 }
 

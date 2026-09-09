@@ -1,9 +1,9 @@
 import Configuration
 import SwiftUI
 
-/// Dictation Settings (P5a Phase 4): default tone, cleanup toggle, and a
-/// read-only list of per-app insertion overrides. Override *learning* is Phase 5;
-/// this pane only displays whatever `text_insertion.app_overrides` already holds.
+/// Dictation Settings (P5a Phase 4): default tone and cleanup toggle. The per-app
+/// AX/paste insertion override list this pane once showed is gone — AX insertion was
+/// removed (dictation always pastes now), so there is nothing left to override.
 struct DictationPane: View {
     @ObservedObject var coordinator: AppCoordinator
 
@@ -39,44 +39,10 @@ struct DictationPane: View {
                     get: { coordinator.settings.dictation.cleanupEnabled },
                     set: { coordinator.setDictationCleanupEnabled($0) }))
 
-            Divider()
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("App Overrides").font(.subheadline.bold())
-                appOverridesList
-            }
-
             Spacer()
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    @ViewBuilder
-    private var appOverridesList: some View {
-        let overrides = coordinator.settings.textInsertion.appOverrides
-        if overrides.isEmpty {
-            Text("No app overrides yet")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        } else {
-            ForEach(overrides.keys.sorted(), id: \.self) { bundleID in
-                HStack {
-                    Text(bundleID)
-                    Spacer()
-                    Text(Self.overrideLabel(overrides[bundleID]))
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-    }
-
-    private static func overrideLabel(_ override: Configuration.Settings.InsertionOverride?) -> String {
-        switch override {
-        case .ax: return "AX"
-        case .paste: return "Paste"
-        case nil: return ""
-        }
     }
 }
 

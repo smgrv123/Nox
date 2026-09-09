@@ -37,14 +37,14 @@ actor FakeCaptureBuffer: AudioCaptureBuffer {
 @MainActor
 final class RecordingInserter: TextInserting {
     var focus = InsertionFocus(bundleID: "com.apple.TextEdit", accessibilityTrusted: true)
-    var result: InsertionResult = .insertedViaAX
-    private(set) var inserted: [(text: String, plan: InsertionPlan)] = []
+    var result: InsertionResult = .insertedViaPaste
+    private(set) var inserted: [String] = []
     private(set) var copied: [String] = []
 
     func resolveFocus() async -> InsertionFocus { focus }
 
-    func insert(_ text: String, plan: InsertionPlan) async -> InsertionResult {
-        inserted.append((text, plan))
+    func insert(_ text: String) async -> InsertionResult {
+        inserted.append(text)
         return result
     }
 
@@ -114,14 +114,6 @@ func dictationTestEndpoint(isLocal: Bool = true) -> LLMEndpoint {
         isLocal: isLocal)
 }
 
-final class RecordingOverrideSink: @unchecked Sendable {
-    private(set) var calls: [(bundleID: String, override: AppInsertionOverride)] = []
-
-    func record(bundleID: String, override: AppInsertionOverride) {
-        calls.append((bundleID, override))
-    }
-}
-
 final class RecordingHistorySink: @unchecked Sendable {
     private(set) var entries: [DictationHistoryEntry] = []
 
@@ -141,10 +133,8 @@ func makeDictationDriver(
         throw DictationTestError.endpointUnavailable
     },
     tonePreset: @escaping @Sendable () -> TonePreset = { .asIs },
-    overrides: @escaping @Sendable () -> [String: AppInsertionOverride] = { [:] },
     cleanupEnabled: @escaping @Sendable () -> Bool = { true },
     sidecarReady: @escaping @Sendable () async -> Bool = { true },
-    recordOverride: @escaping @Sendable (String, AppInsertionOverride) -> Void = { _, _ in },
     appendHistory: @escaping @Sendable (DictationHistoryEntry) -> Void = { _ in }
 ) -> DictationDriver {
     DictationDriver(
@@ -156,10 +146,8 @@ func makeDictationDriver(
         llm: llm,
         resolveEndpoint: resolveEndpoint,
         tonePreset: tonePreset,
-        overrides: overrides,
         cleanupEnabled: cleanupEnabled,
         sidecarReady: sidecarReady,
-        recordOverride: recordOverride,
         appendHistory: appendHistory)
 }
 

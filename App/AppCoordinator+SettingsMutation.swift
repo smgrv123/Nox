@@ -1,5 +1,4 @@
 import Configuration
-import Dictation
 import Foundation
 import Hotkeys
 import Overlay
@@ -59,15 +58,6 @@ extension AppCoordinator {
     func setDictationCleanupEnabled(_ enabled: Bool) {
         guard settings.dictation.cleanupEnabled != enabled else { return }
         updateSettings { $0.dictation.cleanupEnabled = enabled }
-    }
-
-    /// Persist a per-app insertion override learned from paste-fallback after AX
-    /// failed (P5a Phase 5). Maps Dictation's enum onto Configuration's at this
-    /// boundary so Configuration never imports Dictation.
-    func recordAppInsertionOverride(bundleID: String, override: Dictation.AppInsertionOverride) {
-        guard let mapped = Settings.InsertionOverride(rawValue: override.rawValue) else { return }
-        guard settings.textInsertion.appOverrides[bundleID] != mapped else { return }
-        updateSettings { $0.textInsertion.appOverrides[bundleID] = mapped }
     }
 
     // MARK: - Hotkey rebinding (PHASE 9; User Stories 13, 14, 29)
