@@ -93,6 +93,7 @@ Ask about the world and about the screen.
 | **Contains** | **General-Knowledge Q&A** (local answering, **⟨UNSURE⟩** honesty flow); **Screen Q&A** (`screencapture` → Vision **OCR** with **Bounding Boxes** → prompt); **Session Context** + automatic continuation detection; **Cloud Escalation/BYOK** offload + **Local/Cloud Indicator**. |
 | **HLD / LLD** | HLD §10–12; LLD §2.4, §6 |
 | **Depends on** | **P1, P2, P4** (reserved targets `general_qa` / `screen_qa`) |
+| **Feeds** | **Session Context** also feeds the P5a dictation cleanup prompt (LLD §6.3, currently preset instruction + dictionary substitutions + raw transcript only) — dictation itself holds no cross-utterance buffer, so consecutive dictated utterances don't cohere on their own; that's deliberate, since cross-utterance coherence is solved once here rather than with a dictation-local buffer. |
 | **Done =** | Confident local answer; uncertain → consent-gated offload; a follow-up that uses context; a screen question answered from OCR. |
 
 ### P7 · Automations & Scheduling

@@ -213,7 +213,7 @@ flowchart TB
 
     subgraph textproc["Text & Screen processing"]
         DICT["<b>Dictation Pipeline</b><br/>tone-aware cleanup pass;<br/>Tone Presets<br/><i>04-hld.md §6</i>"]
-        INS["<b>Text Insertion</b><br/>AX-first (AXUIElement);<br/>clipboard-paste fallback;<br/>per-app allow/deny<br/><i>04-hld.md §6</i>"]
+        INS["<b>Text Insertion</b><br/>paste-only (synthetic ⌘V);<br/>Secure Input pre-check;<br/>clipboard save/restore<br/><i>04-hld.md §6</i>"]
         SQA["<b>Screen Q&A</b><br/>screencapture → Apple Vision OCR<br/>(Bounding Boxes) → LLM<br/><i>04-hld.md §10</i>"]
         PERS["<b>Personalization Dictionary</b><br/>explicit-only; term+mishearings;<br/>MRU-bounded; Whisper bias + cleanup<br/><i>04-hld.md §11</i>"]
     end
@@ -283,7 +283,7 @@ Aide is a Swift app; concurrency is expressed with **Swift structured concurrenc
 
 | Execution context | What runs there | Rule |
 |---|---|---|
-| **Main thread (MainActor)** | All UI: Menubar App, Overlay, modal confirm, Listening State transitions, AX text insertion. | AppKit/SwiftUI and AXUIElement calls are main-thread-affine. **Never block the main thread** with STT, LLM, OCR, disk, or network work. |
+| **Main thread (MainActor)** | All UI: Menubar App, Overlay, modal confirm, Listening State transitions, text insertion (Secure Input check + synthetic ⌘V). | AppKit/SwiftUI, the `AXIsProcessTrusted()` permission check, and `CGEvent` posting are main-thread-affine. **Never block the main thread** with STT, LLM, OCR, disk, or network work. |
 | **Event-tap thread** | CGEventTap callback for Push-to-Talk keyDown/keyUp. | Callback must be *minimal and non-blocking*: it only flips Listening State and signals the audio actor. Any real work is dispatched off-thread. A slow tap callback stalls global input. |
 | **Audio actor** | AVAudioEngine capture; ring-buffer of PCM while a hotkey is held; hands a finalized buffer to STT on release (batch-on-release v1). | Serial actor; single producer (audio callback) → single consumer (STT). Buffer sized for the max utterance; architected so a streaming consumer can attach later without changing callers (locked decision #6). |
 | **STT executor** | whisper.cpp in-process inference (CPU/ANE/Metal as whisper.cpp chooses). | Runs off-main on a dedicated task; one transcription at a time (see backpressure §6.3). |
@@ -313,7 +313,7 @@ Voice input is inherently serialized by Push-to-Talk (you hold a key, release, o
 
 ### 6.4 Main-thread rules (binding)
 
-1. UI mutation, Overlay/Menubar updates, and AX insertion happen on the MainActor.
+1. UI mutation, Overlay/Menubar updates, and text insertion (paste) happen on the MainActor.
 2. No synchronous inference, disk, or network on the MainActor — hop to a background task and `await`.
 3. The event-tap callback does the *minimum*: state flip + signal; never inference, never disk.
 4. Listening State transitions are published from wherever work happens but *applied* on the MainActor so the Overlay/Menubar never show a stale mic state.
@@ -384,7 +384,7 @@ sequenceDiagram
     participant DC as Dictation Pipeline
     participant SC as Sidecar (llama-server)
     participant SCAN as Scanner (destination-aware)
-    participant INS as Text Insertion (AX-first)
+    participant INS as Text Insertion (paste-only)
     participant APP as Focused app
 
     U->>HK: hold Hotkey B, speak, release
@@ -397,14 +397,15 @@ sequenceDiagram
         SCAN-->>DC: Confirm-Back with override allowed (destination-aware)
     end
     DC->>INS: insert at cursor
-    INS->>APP: AXUIElement insert
-    alt AX rejected (e.g. Electron)
-        INS->>APP: clipboard-paste fallback (save/restore pasteboard)
+    INS->>INS: Secure Input check (IsSecureEventInputEnabled)
+    alt Secure Input active
+        INS-->>U: insertion refused; honest message, text left on the clipboard
+    else
+        INS->>APP: save pasteboard, write concealed/transient text, synthetic ⌘V, restore ~400ms later
     end
-    INS-->>U: text appears; per-app allow/deny map remembers strategy
 ```
 
-Cleanup runs on the **local** Sidecar. The only egress possibility in dictation is nil unless the user explicitly Offloads — dictation cleanup never auto-escalates.
+Cleanup runs on the **local** Sidecar. The only egress possibility in dictation is nil unless the user explicitly Offloads — dictation cleanup never auto-escalates. Insertion itself never leaves the machine either, but it is **paste-only**: the cleaned text transits `NSPasteboard.general` (§10.1) rather than being written directly into the target app via Accessibility.
 
 ### 7.3 Screen Q&A
 
@@ -515,7 +516,7 @@ The stack is **locked** (PRD §2, amended by the locked decisions in the brief).
 | **Routing constraint** | **GBNF Grammar** generated from the Skill Registry | Forces syntactically-valid `{intent, skill_id, parameters}` and renormalizes logprobs so the **Logprob-Derived Routing Confidence** is measurable at the skill-selecting token(s) (locked decision #10). Free-form JSON + repair is slower and unmeasurable; rejected. |
 | **Safety scanner** | **Pure Swift, pattern-based, recursive-descent** | Deterministic, testable, **cannot be prompt-injected** (D2). An LLM-based checker could be talked out of blocking; rejected outright. Recursive descent into pipes/`$()`/backticks/`sh -c` catches nested cases like `bash -c "rm -rf *"`. |
 | **Screen understanding** | `screencapture` → **Apple Vision OCR** (Bounding Boxes) → text LLM | On-device, no VLM (out of scope), preserves rough layout for the text LLM. If OCR yields nothing useful, say so honestly rather than hallucinate. |
-| **Text insertion** | **AX-first (AXUIElement)**, clipboard-paste fallback with pasteboard save/restore, per-app allow/deny map | AX inserts at cursor cleanly; some apps (Electron) reject AX, so a paste fallback must exist day one (PRD §2). |
+| **Text insertion** | **Paste-only**: synthetic ⌘V via `NSPasteboard`, save/restore (~400ms settle), Secure Input pre-check — **reversed from the original AX-first design** (ADR A8) | `AXUIElementSetAttributeValue` on `kAXSelectedTextAttribute` returns `.success` when the write is *accepted*, not when text is actually placed; Electron, Catalyst, and custom text views accept and silently discard it. Confirmed in live use (WhatsApp, Messages): "successful" AX calls (2–26ms) with nothing inserted on screen — and the false success suppressed the paste fallback that would have worked. AX had zero confirmed successes in real use, so it was dropped entirely rather than kept as a first attempt. |
 | **Scheduling** | **launchd** user agents | OS-owned schedule + wake catch-up semantics; no hand-rolled scheduler; a runaway Frozen Script can't destabilize the app. |
 | **Cloud/egress client** | **ONE** OpenAI-compatible HTTP client (base URL + key + model as settings) | Single Local/Cloud choke point → single place to wire the Local/Cloud Indicator (D1). Same client for Sidecar, BYOK cloud, and downloads. |
 | **Model delivery** | Official HF repos, **pinned commit SHA + SHA-256 verify, resumable** | Reproducible, tamper-evident, resumable over flaky links; not bundled in the `.app` (keeps DMG small). |
@@ -601,6 +602,7 @@ flowchart LR
 - **Routing never leaves.** The Router *always* runs on the local Sidecar (locked decision #9). Cloud exists only at the answer/script layer.
 - **Uncertainty → consent, never auto-exfiltration.** When the local model emits the **Sentinel Token ⟨UNSURE⟩** (exact string match), the app offers **Offload** if a BYOK key exists (or auto-Offload only if the user opted in), else shows a **teach-BYOK** message (locked decision #12). It never ships data on a guess.
 - **Screenshots/audio** are processed in-memory/temp and are never an automatic cloud fallback (PRD §4.2, §9).
+- **Dictation insertion transits the system pasteboard — on-device only, not egress, but still a local exposure surface.** Text Insertion is **paste-only** (§8, ADR A8): AX insertion was reversed after `AXUIElementSetAttributeValue` proved to report `.success` without actually placing text in Electron/Catalyst/custom text views, with zero confirmed successes in real use. The cleaned dictation is written to `NSPasteboard.general`, a synthetic ⌘V pastes it into the focused app, and the user's prior clipboard is restored ~400ms later. Any app or clipboard manager with pasteboard access can observe the text during that window; Aide writes `org.nspasteboard.ConcealedType`/`TransientType` markers so well-behaved clipboard managers skip recording it, but this is a **convention, not enforcement** — macOS has no pasteboard sandboxing to prevent it. When Secure Input is active, synthetic keystrokes are discarded before they'd do anything, so this is detected up front (`IsSecureEventInputEnabled()`) and the text is left on the clipboard with an honest message instead of a silent no-op paste.
 
 ### 10.2 Security & the Safety Boundary
 
@@ -630,7 +632,7 @@ flowchart LR
 | Capability | TCC / entitlement | Feature it gates | Degradation if denied |
 |---|---|---|---|
 | Microphone | mic TCC | STT (all voice) | voice input disabled; fix-it hint in settings |
-| Accessibility (AX) | AX TCC | Text Insertion + global hotkeys | dictation/hotkeys degrade; hint |
+| Accessibility (AX) | AX TCC | Text Insertion (posting synthetic ⌘V requires it, same as the AX write it replaced) + global hotkeys | dictation/hotkeys degrade; hint |
 | Screen Recording | screen TCC | Screen Q&A / screenshot | Screen Q&A disabled; hint |
 | Calendar | EventKit TCC | calendar-read Skill | calendar Skill disabled (optional/skippable) |
 | Network (utility) | outbound | Weather/Currency | those Skills degrade offline with clear message |
@@ -640,7 +642,7 @@ A **launchd user agent never needs root**; a voice-triggerable path to root must
 
 ### 10.3 Concurrency, Threading & Backpressure
 
-Consolidated rules (full model in §6): UI + AX on MainActor; no blocking work on main or on the event-tap callback; shared state behind single-owner actors; **one in-flight utterance per session** (no unbounded queues, no concurrent Router runs); bounded audio ring buffer; timeouts on Sidecar calls. Push-to-Talk's natural serialization is the primary backpressure mechanism; the actors make the residual concurrency safe and deterministic.
+Consolidated rules (full model in §6): UI + text insertion on MainActor; no blocking work on main or on the event-tap callback; shared state behind single-owner actors; **one in-flight utterance per session** (no unbounded queues, no concurrent Router runs); bounded audio ring buffer; timeouts on Sidecar calls. Push-to-Talk's natural serialization is the primary backpressure mechanism; the actors make the residual concurrency safe and deterministic.
 
 ### 10.4 Error Handling, Resilience & Recovery
 
@@ -691,8 +693,8 @@ The **calibration-logging harness is day-one** (locked decision #10): until cali
 | Dictation cleanup pass (tone-aware) | — | ~800–1500 ms | single pass (locked default) |
 | Dangerous-Command Scanner (executable only) | < 10 ms | < 10 ms | pure Swift, no I/O |
 | Dispatch + Skill execute (native) | ~50–300 ms | — | varies by Skill |
-| Text Insertion (AX; clipboard fallback ~100 ms) | — | ~50 ms | per-app strategy cached |
-| **Rough total** | **~1.1–1.5 s** | **~1.9–2.9 s** | within budget headroom |
+| Text Insertion (paste-only; clipboard save/restore ~400 ms settle) | — | ~400 ms | dominated by the post-paste clipboard-restore wait, not user-visible text latency; Secure Input pre-check is a negligible-cost syscall |
+| **Rough total** | **~1.1–1.5 s** | **~2.3–3.3 s** | near/at the ~3s target — the paste settle is the main new cost vs. the retired AX path |
 
 Design levers baked into the architecture: **in-process STT** (removes IPC), **GBNF-constrained routing** (few tokens), **Model Residency** on 16GB (no reload latency on follow-ups), **single cleanup pass**, and **near-zero idle CPU** (lazy load; 8GB idle-unload). Streaming STT is architected-for (buffer design, locked decision #6) as the primary future lever if targets slip.
 
@@ -711,7 +713,7 @@ Summary of the locked decisions governing this architecture. These **override** 
 | **A5 Hotkeys** | **CGEventTap** global tap | Clean keyDown/keyUp for Push-to-Talk hold | Carbon RegisterEventHotKey (press-only, no hold) |
 | **A6 Overlay** | **Non-activating NSPanel** + SwiftUI; separate modal for focus-needing confirms; MenuBarExtra separate surface | Must not steal focus during Dictation | Ordinary window (steals focus); MenuBarExtra-only (can't float focusless panel) |
 | **A7 STT mode** | **Batch-on-release v1**; buffer architected for streaming later | Simplicity; meets budget with turbo | Streaming v1 (more complex; deferred as a lever) |
-| **A8 Text Insertion** | **AX-first**, clipboard-paste fallback w/ save-restore, per-app allow/deny | Clean cursor insert; some apps reject AX | AX-only (breaks in Electron); clipboard-only (clobbers pasteboard, racy) |
+| **A8 Text Insertion** | **Paste-only**: synthetic ⌘V via pasteboard, save/restore, Secure Input pre-check. **Reversed** from the original AX-first design (below) — not a deviation, a permanent decision change | AX's `.success` return means "write accepted," not "text placed"; Electron/Catalyst/custom text views accept and silently discard it, and confirmed in live use (WhatsApp, Messages) — "successful" 2–26ms AX calls with nothing inserted, which also suppressed the paste fallback that would have worked. AX had **zero confirmed successes** in real use. | *Original decision (superseded):* AX-first w/ paste fallback and a per-app allow/deny map — abandoned because AX's false-success signal made the fallback logic itself unreliable, not because of a missing per-app entry. *Also rejected:* clipboard-only with no save/restore (clobbers pasteboard, racy). |
 | **A9 Model delivery** | Official HF repos, **pinned commit SHA + SHA-256**, resumable; not bundled | Reproducible, tamper-evident, small DMG | Bundle models (huge DMG); unpinned latest (non-reproducible) |
 | **A10 Routing locality** | **Router ALWAYS local**; **GBNF Grammar** constraint; cloud only at answer/script layer | Privacy (D1); measurable logprobs; valid JSON by construction | Cloud routing (exfiltration risk); free-form JSON + repair (slow, unmeasurable) |
 | **A11 Router Contract v2** | Output `{intent, skill_id, parameters}`, **no confidence field**; safety = Pre-Gate + Logprob confidence + schema HARD-reject + Risk Tier; calibration harness day one | Self-reported confidence is unreliable; logprobs are grounded; amends PRD §6 | PRD §6 self-reported `confidence` field (unreliable, un-calibratable) |
@@ -757,7 +759,8 @@ Summary of the locked decisions governing this architecture. These **override** 
 | Sidecar hang/crash under memory pressure | Pipeline stall | Separate process; health-check + backoff restart; request timeouts; legible "reconnecting" state | §10.4 |
 | ⟨UNSURE⟩ Sentinel unreliable (small-model self-knowledge) | Occasional confident hallucination | Honesty system prompt reduces (not eliminates); consent-gated Offload; teach-BYOK; documented honestly (PRD §7.1a) | `04-hld.md §9` |
 | 8GB Whisper degrades on Hindi/code-mixed | Poor non-English dictation | Build-time calibration of small vs medium on non-English audio (PRD §3, §10 note) | `04-hld.md §3` |
-| AX insertion rejected by an app (Electron) | Dictation fails silently | Clipboard-paste fallback with pasteboard save/restore; per-app allow/deny map cached | `04-hld.md §6` |
+| Synthetic ⌘V discarded under macOS Secure Input (a password field focused anywhere on the system) | Dictation insertion silently fails | `IsSecureEventInputEnabled()` checked before posting; text left on the clipboard with an honest message instead of a phantom insert | `04-hld.md §9.4` |
+| Dictated text transits the system pasteboard (paste-only insertion, ADR A8 reversal) | Any app/clipboard manager with pasteboard access can observe dictated text during the ~400ms save/restore window | `org.nspasteboard.ConcealedType`/`TransientType` markers (convention, honored by common managers, not enforced); prior clipboard restored ~400ms after paste; AX insertion was abandoned after it showed zero confirmed real-world successes and a false-success signal that suppressed the paste fallback | `§10.1`, `04-hld.md §9.4` |
 | TCC grant denied mid-onboarding | Broken first-run | Per-permission "why" + deep-link + auto-advance on grant; graceful degradation + persistent fix-it hints | `04-hld.md §14`, `06-walkthrough.md` |
 | Calibration threshold wrong before enough data | Too many/few Confirm-Backs | Loose provisional thresholds; day-one calibration log; tighten after ~1 week; false-positives acceptable, false-negatives not | §10.5 |
 | Dynamic port handshake race on relaunch | Sidecar unreachable | Single-instance enforcement; port discovered from spawn handshake; health-check gates readiness | §4.2, §6.5 |

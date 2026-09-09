@@ -86,7 +86,7 @@ Aide is one Menubar App process plus one Sidecar (`llama-server`) child process.
 | `KnowledgeQA` | Local general-knowledge answering; ⟨UNSURE⟩ Sentinel handling; owns rolling Session Context. |
 | `CloudEscalation` | Orchestrates BYOK Offload for scripts and uncertain Q&A; drives the Local/Cloud Indicator. |
 | `Personalization` | Personalization Dictionary store & consumers (Whisper bias prompt, cleanup prompt); "correct that" extraction. |
-| `TextInsertion` | AX-first insertion with clipboard-paste fallback (save/restore); per-app allow/deny map. |
+| `TextInsertion` | Paste-only insertion: synthetic ⌘V via `NSPasteboard` with save/restore and a Secure Input pre-check. Reversed from an original AX-first design (§9.4; `03-architecture.md` ADR A8). |
 
 **Layer 4 — Input & UI**
 
@@ -539,7 +539,7 @@ sequenceDiagram
     TI->>SC: destination check
     SC-->>TI: Confirm-Back (override) / clean
   end
-  TI->>TI: AX insert → clipboard-paste fallback (save/restore)
+  TI->>TI: Secure Input check → paste (save pasteboard, write, ⌘V, restore ~400ms later)
 ```
 
 ### 9.2 Tone Presets
@@ -555,9 +555,11 @@ sequenceDiagram
 
 Both consumers stay bounded forever (MRU cap). No model training anywhere.
 
-### 9.4 Text Insertion (AX-first, clipboard-paste fallback)
+### 9.4 Text Insertion (paste-only)
 
-`TextInsertion` inserts **AX-first** via the Accessibility API; when an app rejects AX insertion (notably Electron), it falls back to **clipboard-paste with save/restore** of the user's prior clipboard. A **per-app allow/deny map** records which apps need the fallback. If the destination is a terminal emulator, the Scanner destination check (§8.2 point 5) runs first.
+`TextInsertion` is **paste-only**: it saves the current `NSPasteboard.general` contents, writes the cleaned text (tagged with `org.nspasteboard.ConcealedType`/`TransientType` so cooperating clipboard managers skip recording it), posts a synthetic `Cmd+V`, and restores the user's prior clipboard ~400ms later. Before doing any of that it checks `IsSecureEventInputEnabled()`; if Secure Input is active, synthetic keystrokes would be silently discarded, so it fails fast with an honest message and leaves the text on the clipboard instead of touching the pasteboard for nothing. If the destination is a terminal emulator, the Scanner destination check (§8.2 point 5) runs first, before any of this.
+
+**Reversed from an original AX-first design** (`03-architecture.md` ADR A8): `AXUIElementSetAttributeValue` on `kAXSelectedTextAttribute` returns `.success` when the attribute write is *accepted*, not when text is actually inserted — Electron, Catalyst, and custom text views accept and silently discard it. Confirmed in live use (WhatsApp, Messages): "successful" AX insertions (2–26ms) with nothing appearing on screen, and the false success suppressed the paste fallback that would have worked. AX had zero confirmed successes in real use, so it — and the per-app allow/deny map that picked between AX and paste — were removed entirely, not deferred.
 
 ---
 
@@ -753,7 +755,7 @@ TCC deep-link targets, grant-detection polling, and the per-permission degradati
 
 ### 15.1 Settings surfaces
 
-Over `Configuration`: rebind Hotkey A / Hotkey B (via `HotkeyManager`); Tier override (via `ModelManager`); Tone Preset selection; **BYOK config** (base URL + key + model, and auto-Offload toggle); Wake Word Experimental toggle (off by default); one-click **Wipe history** (§16); per-app AX/clipboard allow-deny visibility; graceful-degradation fix-it hints for denied permissions.
+Over `Configuration`: rebind Hotkey A / Hotkey B (via `HotkeyManager`); Tier override (via `ModelManager`); Tone Preset selection; **BYOK config** (base URL + key + model, and auto-Offload toggle); Wake Word Experimental toggle (off by default); one-click **Wipe history** (§16); graceful-degradation fix-it hints for denied permissions. (Text Insertion has no per-app setting — it is paste-only for every app, §9.4.)
 
 ### 15.2 Personalization Dictionary (explicit-only v1)
 
@@ -868,7 +870,7 @@ sequenceDiagram
   alt target = terminal emulator
     TI->>SC: destination check → Confirm-Back (override)
   end
-  TI->>TI: AX insert → clipboard fallback (save/restore)
+  TI->>TI: Secure Input check → paste (save/write/⌘V/restore ~400ms later)
 ```
 
 ### 18.3 Screen Q&A
