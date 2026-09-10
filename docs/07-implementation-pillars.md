@@ -70,10 +70,12 @@ Hold ⌃Space → transcribe → optional tone cleanup → insert at the caret.
 
 | | |
 |---|---|
-| **Contains** | Hotkey B capture → transcribe → single **tone-aware cleanup pass** (**Tone Presets**) → **Text Insertion** (AX-first, clipboard-paste fallback, clipboard restore, terminal-destination scan via P3 C11) → Settings (`tone`, `dictation.cleanup_enabled`, `text_insertion.app_overrides`) → raw bypass when the sidecar is not ready. |
+| **Contains** | Hotkey B capture → transcribe → single **tone-aware cleanup pass** (**Tone Presets**) → **Text Insertion** (paste-only: synthetic ⌘V with clipboard save/restore and clipboard-manager skip markers, Secure-Input preflight, copy-to-clipboard escape, terminal-destination scan via P3 C11) → Settings (`tone`, `dictation.cleanup_enabled`) → raw bypass when the sidecar is not ready. |
 | **HLD / LLD** | HLD §9, §18.2; LLD §2.5, §3.5, §4.6–4.7, §6.3, §8–10 |
 | **Depends on** | **P1, P2, P3** (P4 merged to `main` but not a logic dependency) |
 | **Done =** | Dictate into a standard app and into a terminal — cleaned (or raw on bypass), inserted, with Confirm-Back on terminal input. |
+
+> **AX insertion was removed during implementation** — see ADR **A8** in [`03-architecture.md`](./03-architecture.md). `AXUIElementSetAttributeValue(…, kAXSelectedTextAttribute, …)` reports success on *acceptance*, not insertion, so Electron/Catalyst/custom text views accepted and discarded it; it had zero confirmed successes in real use. With AX gone, `InsertionPlanner`, `AppInsertionOverride`, `InsertionPlan`, `TerminalBundleAllowlist` and per-app override learning went with it. Accessibility permission is still required — synthetic ⌘V needs it. The P5a spec and plan carry an amendment banner recording the same reversal.
 
 ### P5b · Personalization Dictionary
 Explicit-only vocabulary store consumed by Whisper and cleanup.
@@ -135,6 +137,6 @@ Each pillar gets, in order:
 | P2 Inference Core | **Complete** — P2a · Speech-to-Text (all 5 phases) + P2b · LLM Runtime (all 6 phases) shipped |
 | P3 Safety Guard | **Complete** — all 6 phases shipped (`plans/P3-safety-guard.md`); recursive-descent scanner with 370 tests |
 | P4 Command Routing & Skills | **Complete** — headless Phases 1–7 (`plans/P4-command-routing-and-skills.md`) plus app-wiring Phases 1–6 (`plans/P4-app-wiring.md`) |
-| P5a Dictation Core | **In progress** — Phase 5 (degradation, paste-override learning, history) implemented on `feat/p5a-dictation-core` (`plans/P5a-dictation-core.md`) |
+| P5a Dictation Core | **Complete** — all 5 phases shipped on `feat/p5a-dictation-core` (`plans/P5a-dictation-core.md`); insertion is paste-only per ADR A8 |
 | P5b Personalization Dictionary | **Spec + plan authored** — implementation not started (`plans/P5b-personalization-dictionary.md`); execute after P5a |
 | P6, P7 | Not started |

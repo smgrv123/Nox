@@ -6,6 +6,58 @@
 > Execution: `/execute-plan --tdd`, **one phase at a time**, TDD vertical slices.
 >
 > **Explicitness override.** The `prd-to-plan` template says not to name files. The user instructed: *leave no part of the work another agent will do to guess.* This plan names modules, signatures, constants, registration, and tests. Do not generalize it.
+>
+> **Status: all 5 phases complete.** Read the amendment below before treating any signature
+> here as current.
+
+## Amendment — AX insertion removed (post-implementation)
+
+Phases 1–5 shipped, but **AX insertion was reversed during Phase 5 hardening**; insertion is
+now **paste-only**. See ADR **A8** in [`docs/03-architecture.md`](../docs/03-architecture.md)
+and the matching amendment in the PRD. `AXUIElementSetAttributeValue(…, kAXSelectedTextAttribute, …)`
+returns `.success` on *acceptance*, not insertion — Electron, Catalyst and custom text views
+accept and discard it. Zero confirmed successes across WhatsApp, Messages, VS Code, Ghostty
+and Finder, and its false success suppressed the paste fallback, silently losing the utterance.
+
+**Deleted:** `Sources/Dictation/InsertionPlanner.swift`,
+`Sources/Dictation/TerminalBundleAllowlist.swift`, `Sources/AideCore/InsertionOverride.swift`,
+`Tests/DictationTests/InsertionPlannerTests.swift`,
+`Tests/DictationTests/TerminalBundleAllowlistTests.swift`, and the
+`settings.text_insertion` block.
+
+**Current `TextInserting`:**
+
+```swift
+public enum InsertionFailure: Equatable, Sendable {
+    case secureInput
+    case pasteFailed(detail: String)
+}
+
+public enum InsertionResult: Equatable, Sendable {
+    case insertedViaPaste
+    case failed(InsertionFailure)
+    case copiedToClipboard
+}
+
+@MainActor
+public protocol TextInserting: AnyObject {
+    func resolveFocus() async -> InsertionFocus
+    func insert(_ text: String) async -> InsertionResult
+    func copyToClipboard(_ text: String) async
+}
+```
+
+**Other departures from this plan, all deliberate and user-approved:**
+
+| Planned | Shipped | Why |
+|---|---|---|
+| `peakNormalize` copied privately (Phase 1, and an explicit PRD non-goal) | Whole capture→transcribe→Pre-Gate front half extracted to `SpeechToText.CaptureTranscribeGate`, shared with `STTVoiceSessionDriver` | Code-review finding. Placed in `SpeechToText` (both dependents already import it) so no pillar seam is crossed |
+| Paste settle 80ms (PROVISIONAL) | **400ms** | 80ms was never tuned; a loaded app easily exceeds it. 300–500ms is the sane band |
+| `SamplingParams(temperature: 0.2, topP: 1.0, maxTokens: 1024, topLogprobs: 0)` | Same, plus `disableThinking: true` → `chat_template_kwargs: {"enable_thinking": false}` | Qwen3 hybrid reasoning is on by default. Measured 27.35s → 1.79s on identical input |
+| Cleanup runs, then terminal scan on the transcript | Cleanup **skipped** for terminal destinations; scan runs on the exact string about to be inserted | Scanning text the model may have rewritten is the wrong string to scan |
+| Confirm-Back has no timeout | 10s timeout that **copies to clipboard** | Timeout originally called `reject()`, silently destroying the text |
+| No timing capture | Six optional timing fields on `DictationHistoryEntry` (`audio_ms`, `stt_ms`, `model_load_ms`, `cleanup_ms`, `insert_ms`, `total_ms`); `InsertionKind.ax` retained for backward-compatible decoding of old history lines | Measure latency rather than guess at it |
+| — | Secure-Input preflight; nspasteboard concealed/transient markers; "Copy Last Dictation" menubar item | Added during the AX reversal |
 
 ## Architectural decisions
 
@@ -23,43 +75,36 @@ Durable across all phases:
       public var accessibilityTrusted: Bool
   }
 
-  public enum AppInsertionOverride: String, Equatable, Sendable, Codable {
-      case ax
-      case paste
-  }
-
-  public enum InsertionPlan: Equatable, Sendable {
-      case axThenPaste
-      case axOnly
-      case pasteOnly
+  public enum InsertionFailure: Equatable, Sendable {
+      case secureInput
+      case pasteFailed(detail: String)
   }
 
   public enum InsertionResult: Equatable, Sendable {
-      case insertedViaAX
       case insertedViaPaste
-      case failed(reason: String)
-      case copiedToClipboard   // Phase 5 escape
+      case failed(InsertionFailure)
+      case copiedToClipboard
   }
 
   @MainActor
   public protocol TextInserting: AnyObject {
       func resolveFocus() async -> InsertionFocus
-      func insert(_ text: String, plan: InsertionPlan) async -> InsertionResult
-      func copyToClipboard(_ text: String) async  // Phase 5; can no-op stub earlier
+      func insert(_ text: String) async -> InsertionResult
+      func copyToClipboard(_ text: String) async
   }
   ```
 
-  **No `AXUIElement` in this module** (LLD §3.5 deviation, documented in the PRD).
+  *As-built. The plan originally specified `AppInsertionOverride` / `InsertionPlan` / `insert(_:plan:)` — see the amendment above.*
 
-- **`InsertionPlanner`:** `func plan(focus: InsertionFocus, override: AppInsertionOverride?, isTerminal: Bool) -> InsertionPlan`. Phase 1 ignores `isTerminal`. Phase 2 still returns an insert plan; **scanning is the driver's job** (planner does not call the scanner). `isTerminal` may force the driver to scan before executing whatever plan is returned.
-- **Terminal IDs:** promote `ScanRuleEngine.terminalBundleIDs` to `public` (e.g. `public enum TerminalBundleIDs { public static let allowlist: Set<String> }` on `DangerousCommandScanner`). `Dictation.TerminalBundleAllowlist.contains` delegates to it. Test: the two sets are equal — actually they **are** the same set; the test is `TerminalBundleAllowlist.ids == TerminalBundleIDs.allowlist` and a corpus of the seven IDs from `ScanRuleEngine.swift` today: `com.apple.Terminal`, `com.googlecode.iterm2`, `dev.warp.Warp-Stable`, `com.mitchellh.ghostty`, `net.kovidgoyal.kitty`, `org.alacritty`, `com.github.wez.wezterm`.
+- **~~`InsertionPlanner`~~:** Deleted with AX reversal; one insertion path (paste) leaves nothing to plan.
+- **Terminal IDs:** promote `ScanRuleEngine.terminalBundleIDs` to `public` (e.g. `public enum TerminalBundleIDs { public static let allowlist: Set<String> }` on `DangerousCommandScanner`). ~~`Dictation.TerminalBundleAllowlist.contains` delegates to it. Test: the two sets are equal — actually they **are** the same set; the test is `TerminalBundleAllowlist.ids == TerminalBundleIDs.allowlist`~~ The driver now reads the scanner's public `allowlist` directly, removing the divergence risk. Seven terminal IDs: `com.apple.Terminal`, `com.googlecode.iterm2`, `dev.warp.Warp-Stable`, `com.mitchellh.ghostty`, `net.kovidgoyal.kitty`, `org.alacritty`, `com.github.wez.wezterm`.
 - **Cleanup bypass (Phase 4):** `Settings.Dictation.cleanupEnabled` default `true`. Sidecar **not** `.ready` → insert raw immediately; Overlay summary **exactly** `Inserted raw — language model wasn't ready.` Do **not** await the 45s `resolveLiveSidecarEndpoint` path. Optional background `startIfNeeded`. Modifier-key bypass is forbidden.
-- **Settings v6:** add `tone`, `dictation`, `text_insertion` blocks; `currentSchemaVersion = 6`; `SettingsMigration(from: 5, to: 6)`.
+- **Settings v6:** add `tone`, `dictation` ~~, `text_insertion`~~ blocks; `currentSchemaVersion = 6`; `SettingsMigration(from: 5, to: 6)`. Schema still bumps to v6 for `tone` + `dictation` alone.
 - **Confirm-Back:** `ConfirmBackInfo(transcript:text, intent:text, skillID: "dictation_insert", riskTier: .alwaysConfirm)`.
 - **P5b slots on `DictationDriver`:** `makeInitialPrompt: @Sendable () async -> String? = { nil }` and `dictionarySubstitutions: @Sendable () async -> String = { "" }`.
-- **Peak normalize:** copy `STTVoiceSessionDriver.peakNormalize` privately. Do not extract.
-- **LLM cleanup:** `SamplingParams(temperature: 0.2, topP: 1.0, maxTokens: 1024, topLogprobs: 0)`, `stream: false`, local endpoint only.
-- **Paste settle:** 80ms (PROVISIONAL) in `TextInserterLive` only.
+- **Peak normalize:** ~~copy `STTVoiceSessionDriver.peakNormalize` privately. Do not extract.~~ Whole capture→transcribe→Pre-Gate front half extracted to `SpeechToText.CaptureTranscribeGate`, shared with `STTVoiceSessionDriver` (code-review finding). Placed in `SpeechToText` because both dependents already import it, so no pillar seam is crossed.
+- **LLM cleanup:** `SamplingParams(temperature: 0.2, topP: 1.0, maxTokens: 1024, topLogprobs: 0, disableThinking: true)`, `stream: false`, local endpoint only. Maps to `chat_template_kwargs: {"enable_thinking": false}` (Qwen3 hybrid reasoning is on by default; measured 27.35s → 1.79s).
+- **Paste settle:** 400ms in `TextInserterLive` only. Originally 80ms (PROVISIONAL, never tuned); ⌘V only queues the keystroke and the target app reads the pasteboard on its own schedule, so 300–500ms is the sane band.
 - **Testing:** TDD, one test → one impl. Pattern: `Tests/STTVoiceSessionTests`.
 - **Per-phase gate (MUST):** `just check` **and** `just app` **and** SwiftLint 0 warnings. `swift build` / `just check` **do not compile `App/`**. After commit, run `just check` again (pre-commit strict-lints but does not fail on format). Never `--no-verify`. Never `--amend`.
 
@@ -75,21 +120,21 @@ Hold ⌃Space → transcribe → insert **raw** text at the caret. No cleanup, n
 
 1. Register `Dictation` in `Package.swift` (library + target deps `AideCore`, `SpeechToText`; test target) and `project.yml`; `just gen`.
 2. `Sources/Dictation/TextInserting.swift` — types + protocol above. `copyToClipboard` may empty-default via protocol extension.
-3. `Sources/Dictation/InsertionPlanner.swift` — default `.axThenPaste`; override `.paste` → `.pasteOnly`; override `.ax` → `.axOnly`. `isTerminal` unused.
+3. ~~`Sources/Dictation/InsertionPlanner.swift` — default `.axThenPaste`; override `.paste` → `.pasteOnly`; override `.ax` → `.axOnly`. `isTerminal` unused.~~ Not shipped; deleted with AX reversal — see amendment above.
 4. `Sources/Dictation/DictationDriver.swift` — copy structure from `Sources/STTVoiceSession/STTVoiceSessionDriver.swift` (generation, captureTask, begin/end/cancel, Pre-Gate, peakNormalize, degraded summaries). Differences:
-   - `init(engine:capture:preGate:inserter:overrides:)` where `overrides: @Sendable () -> [String: AppInsertionOverride] = { [:]}`.
+   - `init(engine:capture:preGate:inserter:)` ~~`overrides:` where `overrides: @Sendable () -> [String: AppInsertionOverride] = { [:]}`~~ (parameter deleted with AX reversal).
    - `transcribe(..., initialPrompt: await makeInitialPrompt())` (nil for now).
-   - On Pre-Gate `.pass`: `resolveFocus()` → `InsertionPlanner.plan` → `insert`; then `onUpdate(.transcript)` and `.result(VoiceSessionResult(transcript:text, summary:text))`.
+   - On Pre-Gate `.pass`: `resolveFocus()` → `insert`; then `onUpdate(.transcript)` and `.result(VoiceSessionResult(transcript:text, summary:text))`.
    - On insert `.failed`: still deliver transcript; summary is the failure reason (do not swallow).
    - Do **not** call LLM. Do **not** scan.
-5. `App/TextInserterLive.swift` — `@MainActor`. `resolveFocus`: `AXIsProcessTrusted()` + `NSWorkspace.shared.frontmostApplication?.bundleIdentifier`. `insert`: AX path `AXUIElementCreateSystemWide` → focused UI element → `AXUIElementSetAttributeValue(..., kAXSelectedTextAttribute, text as CFTypeRef)`. On AX skip/fail: snapshot `NSPasteboard.general` (all types via `pasteboardItems` / type-data map), `clearContents()`, `setString`, CGEvent ⌘V keyDown/keyUp to `CGEventPost(.cghidEventTap)` or the focused process, `Task.sleep` 80ms, restore snapshot **even if paste threw**. Requires import ApplicationServices + AppKit.
+5. `App/TextInserterLive.swift` — `@MainActor`. `resolveFocus`: `AXIsProcessTrusted()` + `NSWorkspace.shared.frontmostApplication?.bundleIdentifier` (AX status still required for synthetic ⌘V). `insert`: Secure-Input preflight via `IsSecureEventInputEnabled()` (Carbon) **before** touching the pasteboard; snapshot all pasteboard types via `pasteboardItems` / type-data map; `clearContents()`; write one `NSPasteboardItem` carrying the string plus `org.nspasteboard.ConcealedType` and `org.nspasteboard.TransientType` markers in one `writeObjects` batch; CGEvent ⌘V keyDown/keyUp to `.cghidEventTap`; `Task.sleep` 400ms; restore snapshot **even on failure**. Requires import ApplicationServices + AppKit.
 6. Wire in `setUpCommandMode()`: construct `DictationDriver` with the **same** `engine`/`capture`/`preGate` instances already built for command mode (one Whisper context, one mic). Pass `TextInserterLive()`.
 
 ### Named tests (`Tests/DictationTests/`)
 
-- `InsertionPlannerTests.testDefaultPlanIsAXThenPaste`
-- `InsertionPlannerTests.testPasteOverride`
-- `InsertionPlannerTests.testAXOverride`
+- ~~`InsertionPlannerTests.testDefaultPlanIsAXThenPaste`~~ Removed with module.
+- ~~`InsertionPlannerTests.testPasteOverride`~~ Removed with module.
+- ~~`InsertionPlannerTests.testAXOverride`~~ Removed with module.
 - `DictationDriverTests.testPassInsertsRawTranscript` — `MockSTTEngine` + fake capture (copy `STTVoiceSessionTests` fake) + `RecordingInserter`; assert `insert` called once with the Pre-Gate text; `chat` N/A.
 - `DictationDriverTests.testPreGateFailDoesNotInsert`
 - `DictationDriverTests.testCancelSuppressesInsert`
@@ -106,7 +151,7 @@ Do **not** unit-test `TextInserterLive`.
 - [x] Named tests above exist and pass via `swift test`.
 - [x] Mux dictation inner driver is `DictationDriver`; command path unchanged.
 - [x] `TextInserterLive` compiles in the app target (`just app`).
-- [ ] Manual: hold ⌃Space in TextEdit, speak, raw text at caret (or Overlay-only if AX not granted — then paste fallback should still land).
+- [x] Manual: hold ⌃Space in TextEdit, speak, raw text at caret (or Overlay-only if AX not granted — then paste fallback should still land).
 - [x] Per-phase gate green.
 
 ---
@@ -117,7 +162,7 @@ Do **not** unit-test `TextInserterLive`.
 
 ### What to build
 
-Before inserting, if `TerminalBundleAllowlist.contains(focus.bundleID)`, scan:
+Before inserting, if `TerminalBundleIDs.allowlist.contains(bundleID)`, scan:
 
 ```
 scanner.scan(text, context: ScanContext(channel: .dictatedOneOff, destinationBundleID: bundleID, manifestID: nil))
@@ -126,7 +171,7 @@ scanner.scan(text, context: ScanContext(channel: .dictatedOneOff, destinationBun
 Use `DangerousCommandScanner()` (the struct). Inject `any CommandScanning` into `DictationDriver` for tests.
 
 - `.clean` → insert as Phase 1.
-- `.confirm(findings)` → stash pending text+plan; `onUpdate(.confirmBack(ConfirmBackInfo(... skillID: "dictation_insert", riskTier: .alwaysConfirm)))`. **Zero characters inserted.**
+- `.confirm(findings)` → stash pending text; `onUpdate(.confirmBack(ConfirmBackInfo(... skillID: "dictation_insert", riskTier: .alwaysConfirm)))`. **Zero characters inserted.**
 - `.hardBlock` → `onUpdate(.hardBlocked(text, findings.first?.explanation ?? "Blocked"))`. Never insert. No approve path.
 
 `approve()`: insert stashed text; deliver `.result`. `reject()`: drop stash; deliver `.result` with summary `"Cancelled."`.
@@ -139,7 +184,7 @@ Overlay already has Confirm-Back buttons (`overlay.onApprove` / `onReject` alrea
 
 ### Named tests
 
-- `TerminalBundleAllowlistTests.testMatchesScannerAllowlist`
+- ~~`TerminalBundleAllowlistTests.testMatchesScannerAllowlist`~~ Removed with wrapper.
 - `DictationDriverTests.testTerminalConfirmDoesNotInsertUntilApprove`
 - `DictationDriverTests.testApproveInsertsStashedText`
 - `DictationDriverTests.testRejectDoesNotInsert`
@@ -152,7 +197,7 @@ Keep existing `Tests/DangerousCommandScannerTests` C11 cases green; do not edit 
 
 - [x] Named tests pass.
 - [x] Scanner C11 corpus still green.
-- [ ] Manual: dictating into Terminal shows Confirm-Back; Approve pastes/inserts; Reject leaves the prompt unchanged.
+- [x] Manual: dictating into Terminal shows Confirm-Back; Approve pastes/inserts; Reject leaves the prompt unchanged.
 - [x] Per-phase gate green.
 
 ---
@@ -190,7 +235,7 @@ Add `LLMRuntime` to the `Dictation` target deps.
 ### Acceptance criteria
 
 - [x] Named tests pass.
-- [ ] Manual: with sidecar already warm, dictation in TextEdit inserts cleaned (filler dropped) text.
+- [x] Manual: with sidecar already warm, dictation in TextEdit inserts cleaned (filler dropped) text.
 - [x] Per-phase gate green.
 
 ---
@@ -206,7 +251,7 @@ Add `LLMRuntime` to the `Dictation` target deps.
 - `currentSchemaVersion = 6`
 - Nested `Settings.Tone` (`defaultPreset: TonePreset` stored as String to avoid Configuration→Dictation dependency — use `String` raw values `as_is` etc., default `"as_is"`; `available` is not persisted as user-editable, omit from the model or persist as read-only default list).
 - Nested `Settings.DictationBlock` — **name it `DictationSettings`** (`cleanupEnabled: Bool = true`) to avoid clashing with the module name at import sites. JSON key `dictation`.
-- Nested `Settings.TextInsertion` (`appOverrides: [String: AppInsertionOverride]`). Configuration cannot import Dictation — duplicate the `ax`/`paste` enum **inside Configuration** as `Settings.InsertionOverride` (`String` raw values `ax`/`paste`). Dictation's `AppInsertionOverride` should match raw values; map at the app boundary. **Do not** create a module cycle.
+- ~~Nested `Settings.TextInsertion` (`appOverrides: [String: AppInsertionOverride]`). Configuration cannot import Dictation — duplicate the `ax`/`paste` enum **inside Configuration** as `Settings.InsertionOverride` (`String` raw values `ax`/`paste`). Dictation's `AppInsertionOverride` should match raw values; map at the app boundary. **Do not** create a module cycle.~~ Not shipped; deleted with AX reversal.
 
 `SettingsMigration` v5→v6: if keys absent, do not invent huge blobs; tolerant decode supplies defaults. Still bump `schema_version` to 6.
 
@@ -221,7 +266,7 @@ Add `LLMRuntime` to the `Dictation` target deps.
 - If cleanup disabled: never chat; summary is the (prefix-stripped) text.
 - Voice prefix overrides `settings.tone.defaultPreset` for this utterance only.
 
-**`App/Settings/DictationPane.swift`:** default tone picker (four presets), cleanup toggle, read-only list of `app_overrides` (empty-state "No app overrides yet"). Register in `SettingsRootView.panes` as `id: "dictation", title: "Dictation", systemImage: "mic"`.
+**`App/Settings/DictationPane.swift`:** default tone picker (four presets), cleanup toggle~~, read-only list of `app_overrides` (empty-state "No app overrides yet")~~. Register in `SettingsRootView.panes` as `id: "dictation", title: "Dictation", systemImage: "mic"`.
 
 **App wiring:** pass settings closures into `DictationDriver` from `AppCoordinator` (main-actor settings store).
 
@@ -240,7 +285,7 @@ Add `LLMRuntime` to the `Dictation` target deps.
 - [x] v5 settings files migrate; hotkeys preserved.
 - [x] Named tests pass.
 - [x] Dictation pane visible in Settings.
-- [ ] Manual: cleanup off → raw with sidecar warm; cleanup on + quit sidecar / before first load → raw with the exact Overlay summary.
+- [x] Manual: cleanup off → raw with sidecar warm; cleanup on + quit sidecar / before first load → raw with the exact Overlay summary.
 - [x] Per-phase gate green.
 
 ---
@@ -251,22 +296,22 @@ Add `LLMRuntime` to the `Dictation` target deps.
 
 ### What to build
 
-- If `!focus.accessibilityTrusted` and override isn't `.paste`: Overlay `.result` summary **exactly** `Text insertion needs Accessibility. Enable Aide in System Settings.` and still **attempt paste fallback** (paste does not require AX for the clipboard, but synthetic ⌘V often still needs AX — if paste also fails, go to copy escape). Deep-link affordance: include the existing Accessibility deep-link in menubar/Settings; Overlay text does not need a button if Overlay has no generic action slot — do **not** invent Overlay buttons. The Permissions pane already deep-links.
-- `InsertionResult.failed` after both paths: `copyToClipboard(text)` then summary **exactly** `Couldn't insert — copied to clipboard instead.`
-- On `.insertedViaPaste` when the plan was `.axThenPaste` (AX was tried and failed): persist `settings.text_insertion.app_overrides[bundleID] = "paste"` via an injected `recordOverride: (String, AppInsertionOverride) -> Void`. Do **not** record when the user already had a paste override or when plan was `.pasteOnly` from the start.
-- **History:** `struct DictationHistoryEntry: Codable` in `Dictation` (or Persistence if it must live with command history). Fields: `ts`, `mode: "dictation"`, `transcript`, `cleaned` (optional), `cleanupRan: Bool`, `insertion` (ax/paste/failed/copied), `destinationBundleID`. Append with `HistoryLog` to `storage.historyFile(for:)`. Swallow append errors (`try?`) so a log failure cannot block insert; `AideError.storage` is not required if Overlay already showed success.
+- **Accessibility denied:** If `!focus.accessibilityTrusted`, Overlay summary **exactly** `Text insertion needs Accessibility. Enable Aide in System Settings.` The Permissions pane already deep-links; do not invent new Overlay buttons.
+- **Paste failed or Secure Input active:** `InsertionResult.failed` after both paths: `copyToClipboard(text)` then summary **exactly** `Couldn't insert — copied to clipboard instead.`
+- **Per-app override learning:** Deleted with AX reversal. One insertion path (paste) means no per-app divergence to learn.
+- **History:** `struct DictationHistoryEntry: Codable` in `Dictation`. Fields: `ts`, `mode: "dictation"`, `transcript`, `cleaned` (optional), `cleanup_ran: Bool`, `insertion`, `destination_bundle_id`, plus optional timing fields (added later): `audio_ms`, `stt_ms`, `model_load_ms`, `cleanup_ms`, `insert_ms`, `total_ms`. Append via `HistoryLog` to `storage.historyFile(for:)`. Swallow errors (`try?`) so log failure cannot block insert. `InsertionKind.ax` retained **only** for backward-compatible decoding of history lines written before AX reversal.
 
 ### Named tests
 
-- `DictationDriverTests.testBothPathsFailedCopiesToClipboard`
-- `DictationDriverTests.testPasteFallbackRecordsOverrideOnce`
-- `DictationDriverTests.testExistingPasteOverrideDoesNotRescanAX` — planner given `.paste` → inserter `insert` called with `.pasteOnly` only.
+- `DictationDriverTests.testBothPathsFailedCopiesToClipboard` — paste failed escape.
+- ~~`DictationDriverTests.testPasteFallbackRecordsOverrideOnce`~~ Removed with override learning.
+- ~~`DictationDriverTests.testExistingPasteOverrideDoesNotRescanAX`~~ Removed with override learning.
 - `DictationHistoryEntryTests.testJSONKeysSnakeCase` — `destination_bundle_id`, `cleanup_ran`.
 
 ### Acceptance criteria
 
 - [x] Named tests pass.
-- [ ] Manual: AX off → honest Overlay + paste or copy escape; VS Code paste success writes override; Settings pane shows it; `history/commands-*.jsonl` has a dictation line.
+- [x] Manual: paste verified in Messages, Ghostty and Dia; Secure Input and paste failure both fall back to the clipboard copy escape; `history/commands-*.jsonl` has a dictation line with timings.
 - [x] Per-phase gate green.
 
 ---
