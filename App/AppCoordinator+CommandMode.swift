@@ -10,6 +10,7 @@ import Foundation
 import InferenceClient
 import LLMRuntime
 import Persistence
+import Personalization
 import SkillRegistry
 import SpeechToText
 import VoiceSession
@@ -132,10 +133,18 @@ extension AppCoordinator {
             grammar: grammar
         )
         let installedApps = InstalledApplicationCatalogLive()
+        let dictionary: DictionaryStore?
+        if let storage {
+            dictionary = DictionaryStore(fileURL: storage.dictionaryFile)
+        } else {
+            dictionary = nil
+        }
         let dispatcher = CommandDispatcher(
             registry: registry,
             scanner: DangerousCommandScanner(),
-            executor: BuiltinSkillRouter(system: SystemSkillExecutorLive(catalog: installedApps)),
+            executor: BuiltinSkillRouter(
+                system: SystemSkillExecutorLive(catalog: installedApps),
+                dictionary: dictionary),
             thresholds: .provisional
         )
         let logURL =

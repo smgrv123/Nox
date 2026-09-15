@@ -156,6 +156,6 @@ Each pillar gets, in order:
 | P3 Safety Guard | **Complete** — all 6 phases shipped (`plans/P3-safety-guard.md`); recursive-descent scanner with 370 tests |
 | P4 Command Routing & Skills | **Complete** — headless Phases 1–7 (`plans/P4-command-routing-and-skills.md`) plus app-wiring Phases 1–6 (`plans/P4-app-wiring.md`) |
 | P5a Dictation Core | **Complete** — all 5 phases shipped on `feat/p5a-dictation-core` (`plans/P5a-dictation-core.md`); insertion is paste-only per ADR A8 |
-| P5b Personalization Dictionary | **Phase 1 complete** — dictionary store + schema shipped (`plans/P5b-personalization-dictionary.md`); Phases 2–5 remaining |
+| P5b Personalization Dictionary | **Phase 2 complete** — dictionary store + "correct that" skill shipped (`plans/P5b-personalization-dictionary.md`); Phases 3–5 remaining |
 | P5d Streaming Dictation Output | **Idea only** — no spec, no plan. Needs design work on the terminal-scan and paste-only conflicts before a PRD is worth writing |
 | P6, P7 | Not started |

@@ -50,6 +50,10 @@ public actor DictionaryStore {
         document = decoded
     }
 
+    public func record(mishearing: String, correctTerm: String) throws {
+        try record(mishearing: mishearing, correct: correctTerm, source: .explicit)
+    }
+
     public func record(mishearing: String, correct: String, source: DictionaryEntry.Source) throws {
         guard let pair = TermPairExtractor.extractExplicit(mishearing: mishearing, correct: correct) else {
             throw DictionaryStoreError.invalidTermPair
@@ -120,3 +124,5 @@ public actor DictionaryStore {
         }
     }
 }
+
+extension DictionaryStore: DictionaryRecording {}

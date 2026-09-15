@@ -92,9 +92,9 @@ GBNF is generated from manifests — no hand-edited `.gbnf` file. Confirm `FileS
 
 ### Acceptance criteria
 
-- [ ] Named tests pass; existing builtin tests updated for the new `BuiltinSkillRouter` init.
+- [x] Named tests pass; existing builtin tests updated for the new `BuiltinSkillRouter` init.
 - [ ] Manual: Command Mode "correct that alpha should be beta" → Overlay success; `dictionary.json` contains `beta` / `alpha`.
-- [ ] Per-phase gate green.
+- [x] Per-phase gate green.
 
 ---
 

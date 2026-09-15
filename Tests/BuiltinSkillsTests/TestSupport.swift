@@ -1,5 +1,6 @@
 import CommandDispatcher
 import Foundation
+import Personalization
 import SkillManifest
 import XCTest
 
@@ -54,13 +55,22 @@ final class MockSystemSkillExecutor: SystemSkillExecutor, @unchecked Sendable {
     }
 }
 
+final class RecordingSpy: DictionaryRecording, @unchecked Sendable {
+    private(set) var records: [(mishearing: String, correctTerm: String)] = []
+
+    func record(mishearing: String, correctTerm: String) async throws {
+        records.append((mishearing, correctTerm))
+    }
+}
+
 // MARK: - Router factory
 
 func makeRouter(
     system: MockSystemSkillExecutor = MockSystemSkillExecutor(),
+    dictionary: (any DictionaryRecording)? = nil,
     now: @escaping @Sendable () -> Date = { Date() }
 ) -> BuiltinSkillRouter {
-    BuiltinSkillRouter(system: system, now: now)
+    BuiltinSkillRouter(system: system, dictionary: dictionary, now: now)
 }
 
 func frozenRouter(

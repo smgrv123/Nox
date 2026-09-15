@@ -18,6 +18,7 @@ public enum BuiltinManifestCatalog {
         mediaControl,
         takeScreenshot,
         unitConversion,
+        correctThat,
     ]
 
     private static let currentTime = Manifest(
@@ -190,6 +191,26 @@ public enum BuiltinManifestCatalog {
                 "value": .object(["type": .string("number")]),
                 "from_unit": stringProperty(minLength: 1, maxLength: 40),
                 "to_unit": stringProperty(minLength: 1, maxLength: 40),
+            ]
+        ),
+        permissions: ManifestPermissions(),
+        riskTier: .low
+    )
+
+    private static let correctThat = Manifest(
+        id: "correct_that",
+        kind: .builtin,
+        displayName: "Correct That",
+        description: "Remember a mishearing and the correct spelling in the personal dictionary.",
+        utteranceExamples: [
+            "correct that cooper nettie's should be Kubernetes",
+            "correct that sam rit should be Sumrit",
+        ],
+        parameters: objectSchema(
+            required: ["mishearing", "correct_term"],
+            properties: [
+                "mishearing": stringProperty(minLength: 1, maxLength: 200),
+                "correct_term": stringProperty(minLength: 1, maxLength: 200),
             ]
         ),
         permissions: ManifestPermissions(),

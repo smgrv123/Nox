@@ -10,6 +10,7 @@ enum SkillExecutionError: Error, Equatable, LocalizedError {
     case unknownTimezone(String)
     case unknownUnit(String)
     case unsupportedMediaAction(String)
+    case dictionaryUnavailable
 
     var errorDescription: String? {
         switch self {
@@ -25,6 +26,8 @@ enum SkillExecutionError: Error, Equatable, LocalizedError {
             return "unknown unit: \(name)"
         case .unsupportedMediaAction(let action):
             return "unsupported media action: \(action)"
+        case .dictionaryUnavailable:
+            return "Dictionary isn't available."
         }
     }
 }

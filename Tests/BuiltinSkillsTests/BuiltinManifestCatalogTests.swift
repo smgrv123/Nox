@@ -74,10 +74,16 @@ final class BuiltinManifestCatalogTests: XCTestCase {
             propertyTypes: ["value": "number", "from_unit": "string", "to_unit": "string"],
             requires: []
         ),
+        "correct_that": ExpectedRow(
+            riskTier: .low,
+            required: ["mishearing", "correct_term"],
+            propertyTypes: ["mishearing": "string", "correct_term": "string"],
+            requires: []
+        ),
     ]
 
     func testCatalogContainsExactlyTenManifests() {
-        XCTAssertEqual(BuiltinManifestCatalog.all.count, 10)
+        XCTAssertEqual(BuiltinManifestCatalog.all.count, 11)
         let ids = Set(BuiltinManifestCatalog.all.map(\.id))
         XCTAssertEqual(ids, Set(expectedCatalog.keys))
     }
@@ -98,7 +104,7 @@ final class BuiltinManifestCatalogTests: XCTestCase {
     }
 
     func testEveryCatalogIDIsRoutableByBuiltinSkillRouter() async throws {
-        let router = makeRouter()
+        let router = makeRouter(dictionary: RecordingSpy())
         for manifest in BuiltinManifestCatalog.all {
             do {
                 _ = try await router.execute(
@@ -178,6 +184,11 @@ private func sampleParameters(for skillID: String) -> JSONValue {
             "value": .double(10),
             "from_unit": .string("miles"),
             "to_unit": .string("kilometers"),
+        ])
+    case "correct_that":
+        return objectParams([
+            "mishearing": .string("alpha"),
+            "correct_term": .string("beta"),
         ])
     default:
         return objectParams()
