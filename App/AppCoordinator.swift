@@ -88,15 +88,11 @@ final class AppCoordinator: ObservableObject {
     /// production path (`startProductionSidecar`); teardown reads it via
     /// `applicationShouldTerminate`. Main-actor-only-by-convention like the rest of
     /// this file's state: the production path is only ever constructed/read through
-    /// `AppCoordinator+Sidecar.swift`'s `@MainActor` `ensureSidecarManager(model:)` /
+    /// `AppCoordinator+Sidecar.swift`'s `@MainActor` `ensureSidecarManager()` /
     /// `ensureSidecarManagerIfModelProvisioned()`, the single convergence point that
     /// keeps the main-thread launch path and Command Mode's router (which resolves the
     /// Sidecar endpoint off the main actor) from racing to construct two instances.
     var sidecarManagerInstance: SidecarManager?
-
-    /// The model the production Sidecar was last started with — used to restart it
-    /// after an idle-unload (Phase 6; LLD §5.4).
-    var productionSidecarModel: ModelDescriptor?
 
     /// Orchestrates hotkey → Overlay → mux driver → Overlay. Assigned by
     /// `setUpCommandMode()` before `startHotkeys()` so the coordinator is constructed

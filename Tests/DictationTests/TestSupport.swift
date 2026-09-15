@@ -114,6 +114,48 @@ func dictationTestEndpoint(isLocal: Bool = true) -> LLMEndpoint {
         isLocal: isLocal)
 }
 
+/// Records EVERY `chat` call's messages and params, in order — unlike `MockLLMClient`,
+/// which only tracks the most recent call. Needed to distinguish prefill's call from the
+/// real cleanup call when both fire on the same driver run (`+Prefill.swift`'s
+/// `testPrefillPromptIsStrictPrefixOfRealCleanupPrompt`).
+actor RecordingLLMClient: LLMClient {
+    private(set) var chatMessagesHistory: [[ChatMessage]] = []
+    private(set) var chatParamsHistory: [SamplingParams] = []
+    private var chatChunksResult: Result<[ChatCompletionChunk], Error>
+
+    init(chatChunks: [ChatCompletionChunk] = [ChatCompletionChunk(delta: "Cleaned.", isFinal: true)]) {
+        self.chatChunksResult = .success(chatChunks)
+    }
+
+    func setChatChunks(_ result: Result<[ChatCompletionChunk], Error>) {
+        chatChunksResult = result
+    }
+
+    var chatCallCount: Int { chatMessagesHistory.count }
+
+    func routeComplete(
+        system: String,
+        user: String,
+        grammar: String,
+        endpoint: LLMEndpoint
+    ) async throws -> RouterCompletion {
+        RouterCompletion(raw: "", tokenLogprobs: [])
+    }
+
+    func chat(
+        system: String,
+        messages: [ChatMessage],
+        params: SamplingParams,
+        endpoint: LLMEndpoint,
+        stream: Bool
+    ) async throws -> ChatCompletionStream {
+        chatMessagesHistory.append(messages)
+        chatParamsHistory.append(params)
+        let chunks = try chatChunksResult.get()
+        return ChatCompletionStream(chunks: chunks)
+    }
+}
+
 final class RecordingHistorySink: @unchecked Sendable {
     private(set) var entries: [DictationHistoryEntry] = []
 
@@ -134,7 +176,9 @@ func makeDictationDriver(
     },
     tonePreset: @escaping @Sendable () -> TonePreset = { .asIs },
     cleanupEnabled: @escaping @Sendable () -> Bool = { true },
-    sidecarReady: @escaping @Sendable () async -> Bool = { true },
+    sidecarReadiness: @escaping @Sendable () async -> SidecarReadiness = { .ready },
+    awaitSidecarReady: @escaping @Sendable (TimeInterval) async -> Bool = { _ in true },
+    noteSidecarActivity: @escaping @Sendable () async -> Void = {},
     appendHistory: @escaping @Sendable (DictationHistoryEntry) -> Void = { _ in }
 ) -> DictationDriver {
     DictationDriver(
@@ -147,7 +191,9 @@ func makeDictationDriver(
         resolveEndpoint: resolveEndpoint,
         tonePreset: tonePreset,
         cleanupEnabled: cleanupEnabled,
-        sidecarReady: sidecarReady,
+        sidecarReadiness: sidecarReadiness,
+        awaitSidecarReady: awaitSidecarReady,
+        noteSidecarActivity: noteSidecarActivity,
         appendHistory: appendHistory)
 }
 

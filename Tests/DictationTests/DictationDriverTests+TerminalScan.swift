@@ -202,7 +202,15 @@ extension DictationDriverTests {
             inserter.inserted, ["hello world"],
             "approve() must insert the same raw text shown in Confirm-Back")
         let chatCount = await llm.chatCallCount
-        XCTAssertEqual(chatCount, 0, "terminal destinations must skip LLM cleanup entirely")
+        XCTAssertEqual(
+            chatCount, 1,
+            "terminal destinations must skip real LLM cleanup entirely — the one call here is"
+                + " prefill, fired at key-down before the destination bundle is known")
+        let params = await llm.lastSamplingParams
+        XCTAssertEqual(
+            params?.maxTokens, 1,
+            "the single chat call must be prefill (maxTokens: 1), not a stray real cleanup call"
+                + " (maxTokens: 1024)")
     }
 
     func testHardBlockSkipsCleanupButNeverInserts() async {
@@ -232,8 +240,15 @@ extension DictationDriverTests {
         XCTAssertTrue(inserter.inserted.isEmpty, "hard-block never inserts")
         let chatCount = await llm.chatCallCount
         XCTAssertEqual(
-            chatCount, 0,
-            "terminal destinations skip cleanup entirely, even for text that ends up hard-blocked")
+            chatCount, 1,
+            "terminal destinations skip real cleanup entirely, even for text that ends up"
+                + " hard-blocked — the one call here is prefill, fired at key-down before the"
+                + " destination bundle is known")
+        let params = await llm.lastSamplingParams
+        XCTAssertEqual(
+            params?.maxTokens, 1,
+            "the single chat call must be prefill (maxTokens: 1), not a stray real cleanup call"
+                + " (maxTokens: 1024)")
     }
 
     func testNonTerminalDestinationStillGetsCleaned() async {
@@ -261,7 +276,9 @@ extension DictationDriverTests {
             inserter.inserted, ["Cleaned."], "non-terminal destinations must still be cleaned")
         let chatCount = await llm.chatCallCount
         XCTAssertEqual(
-            chatCount, 1, "the terminal-skip fix must not disable cleanup for non-terminal destinations")
+            chatCount, 2,
+            "the terminal-skip fix must not disable cleanup for non-terminal destinations — one"
+                + " prefill call at begin(mode:) plus one real cleanup call at Pre-Gate pass")
     }
 
     func terminalSetup(verdict: ScanVerdict) -> TerminalDictationSetup {

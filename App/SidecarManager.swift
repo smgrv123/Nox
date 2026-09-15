@@ -36,7 +36,7 @@ extension SidecarLifecycleController {
     ///   - idleUnloadThreshold: seconds of inactivity before the Sidecar idle-unloads
     ///     (defaults to `IdleUnloadPolicy.defaultIdleThreshold`, the 8GB production
     ///     value; the 16GB call site passes `IdleUnloadPolicy.tier16IdleThreshold`
-    ///     explicitly — see `AppCoordinator+Sidecar.swift`'s `ensureSidecarManager(model:)`).
+    ///     explicitly — see `AppCoordinator+Sidecar.swift`'s `ensureSidecarManager()`).
     ///   - onStateChange: optional transition observer (used to log timestamped
     ///     state changes during manual verification).
     init(

@@ -145,7 +145,7 @@ extension DictationDriverTests {
             inserter: RecordingInserter(),
             llm: llm,
             resolveEndpoint: { dictationTestEndpoint() },
-            sidecarReady: { false },
+            sidecarReadiness: { .unavailable },
             appendHistory: { history.append($0) })
 
         let resolved = expectation(description: "result delivered")

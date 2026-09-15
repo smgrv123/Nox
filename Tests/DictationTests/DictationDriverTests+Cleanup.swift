@@ -28,7 +28,9 @@ extension DictationDriverTests {
 
         XCTAssertEqual(inserter.inserted, ["Cleaned."])
         let chatCount = await llm.chatCallCount
-        XCTAssertEqual(chatCount, 1)
+        XCTAssertEqual(
+            chatCount, 2,
+            "one prefill call at begin(mode:) plus one real cleanup call at Pre-Gate pass")
         let params = await llm.lastSamplingParams
         XCTAssertEqual(params?.temperature, 0.2)
         XCTAssertEqual(

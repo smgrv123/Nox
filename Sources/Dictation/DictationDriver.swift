@@ -51,7 +51,9 @@ public final class DictationDriver: VoiceSessionDriver {
     private let resolveEndpoint: @Sendable () async throws -> LLMEndpoint
     private let tonePreset: @Sendable () -> TonePreset
     private let cleanupEnabled: @Sendable () -> Bool
-    private let sidecarReady: @Sendable () async -> Bool
+    private let sidecarReadiness: @Sendable () async -> SidecarReadiness
+    private let awaitSidecarReady: @Sendable (TimeInterval) async -> Bool
+    private let noteSidecarActivity: @Sendable () async -> Void
     private let dictionarySubstitutions: @Sendable () async -> String
     private let appendHistory: @Sendable (DictationHistoryEntry) -> Void
 
@@ -86,7 +88,9 @@ public final class DictationDriver: VoiceSessionDriver {
         resolveEndpoint: @escaping @Sendable () async throws -> LLMEndpoint,
         tonePreset: @escaping @Sendable () -> TonePreset = { .asIs },
         cleanupEnabled: @escaping @Sendable () -> Bool = { true },
-        sidecarReady: @escaping @Sendable () async -> Bool = { true },
+        sidecarReadiness: @escaping @Sendable () async -> SidecarReadiness = { .ready },
+        awaitSidecarReady: @escaping @Sendable (TimeInterval) async -> Bool = { _ in true },
+        noteSidecarActivity: @escaping @Sendable () async -> Void = {},
         makeInitialPrompt: @escaping @Sendable () async -> String? = { nil },
         dictionarySubstitutions: @escaping @Sendable () async -> String = { "" },
         appendHistory: @escaping @Sendable (DictationHistoryEntry) -> Void = { _ in }
@@ -97,7 +101,9 @@ public final class DictationDriver: VoiceSessionDriver {
         self.resolveEndpoint = resolveEndpoint
         self.tonePreset = tonePreset
         self.cleanupEnabled = cleanupEnabled
-        self.sidecarReady = sidecarReady
+        self.sidecarReadiness = sidecarReadiness
+        self.awaitSidecarReady = awaitSidecarReady
+        self.noteSidecarActivity = noteSidecarActivity
         self.dictionarySubstitutions = dictionarySubstitutions
         self.appendHistory = appendHistory
         self.gate = CaptureTranscribeGate(
@@ -110,6 +116,38 @@ public final class DictationDriver: VoiceSessionDriver {
     public func begin(mode: VoiceSessionMode) {
         pendingInsert = nil
         gate.begin(mode: mode)
+        noteActivityIfCleanupEnabled()
+        firePrefillIfCleanupEnabled()
+    }
+
+    /// Notes sidecar activity when cleanup is on — once at hotkey key-down (warming the
+    /// model loader with the whole utterance still ahead of it), and again at flow
+    /// completion (so the idle countdown restarts from the end of the flow, not the
+    /// middle). Fire-and-forget by design via an unstructured `Task`: this must never
+    /// block capture or insertion.
+    private func noteActivityIfCleanupEnabled() {
+        guard cleanupEnabled() else { return }
+        Task {
+            await noteSidecarActivity()
+        }
+    }
+
+    /// Fires the cleanup-prompt prefill (`DictationDriver+Prefill.swift`) at hotkey
+    /// key-down, while the user is still speaking and before Whisper has produced any
+    /// transcript — capture is the only idle window this flow has. Fire-and-forget via
+    /// an unstructured `Task`, same as `noteActivityIfCleanupEnabled` above: prefill is
+    /// pure latency optimization and must never block or delay capture.
+    private func firePrefillIfCleanupEnabled() {
+        guard cleanupEnabled() else { return }
+        let context = PrefillContext(
+            llm: llm,
+            resolveEndpoint: resolveEndpoint,
+            tonePreset: tonePreset,
+            sidecarReadiness: sidecarReadiness,
+            dictionarySubstitutions: dictionarySubstitutions)
+        Task {
+            await Self.firePrefill(context)
+        }
     }
 
     public func end() {
@@ -279,62 +317,16 @@ extension DictationDriver {
         gate.deliver(
             .result(VoiceSessionResult(transcript: pending.text, summary: summary)),
             generation: pending.generation)
-    }
 
-    private static func resultSummary(
-        insertion: InsertionResult,
-        cleanupOutcome: DictationCleanupOutcome,
-        accessibilityTrusted: Bool
-    ) -> String {
-        switch insertion {
-        case .copiedToClipboard:
-            return copiedToClipboardSummary
-        case .failed(let failure):
-            // `TextInserterLive` reports Secure Input distinctly when it detects
-            // `IsSecureEventInputEnabled()` before ever posting ⌘V — surface that
-            // distinctly, since "copied to clipboard instead" reads as a generic
-            // paste failure and gives the user no way to tell a manual paste (which
-            // works fine under Secure Input) is the fix.
-            switch failure {
-            case .secureInput:
-                return secureInputSummary
-            case .pasteFailed:
-                return copiedToClipboardSummary
-            }
-        case .insertedViaPaste:
-            switch cleanupOutcome {
-            case .sidecarNotReady, .chatFailed:
-                // Cleanup itself is why we're inserting raw text — that story trumps
-                // the accessibility-denied copy even when AX is also untrusted.
-                return cleanupOutcome.overlayCopy
-            case .cleaned, .skipped:
-                if !accessibilityTrusted {
-                    return accessibilityDeniedSummary
-                }
-                return cleanupOutcome.overlayCopy
-            }
-        }
-    }
-
-    /// Elapsed time since `start`, in whole milliseconds (P5a latency instrumentation).
-    /// `ContinuousClock`-measured — monotonic, immune to wall-clock adjustment.
-    private static func elapsedMs(since start: ContinuousClock.Instant) -> Int {
-        let duration = ContinuousClock.now - start
-        let (seconds, attoseconds) = duration.components
-        return Int((Double(seconds) * 1000) + (Double(attoseconds) / 1e15))
-    }
-
-    private static func historyInsertion(_ result: InsertionResult) -> InsertionKind {
-        switch result {
-        case .insertedViaPaste: return .paste
-        case .copiedToClipboard: return .copied
-        case .failed: return .failed
-        }
+        noteActivityIfCleanupEnabled()
     }
 
 }
 
-private enum DictationCleanupOutcome {
+// `internal` (not `private`) because `DictationDriver+Reporting.swift`'s
+// `resultSummary` — a same-type-extension `static func` in another file — takes this
+// as a parameter; `private` is file-scoped in Swift and wouldn't be visible there.
+enum DictationCleanupOutcome {
     case cleaned(String)
     case skipped(String)
     case sidecarNotReady(String)
@@ -393,7 +385,12 @@ extension DictationDriver {
         guard cleanupEnabled() else {
             return .skipped(raw)
         }
-        guard await sidecarReady() else {
+        switch SidecarReadinessPolicy.decide(await sidecarReadiness()) {
+        case .proceed:
+            break
+        case .waitUpTo(let deadline):
+            guard await awaitSidecarReady(deadline) else { return .sidecarNotReady(raw) }
+        case .insertRaw:
             return .sidecarNotReady(raw)
         }
 

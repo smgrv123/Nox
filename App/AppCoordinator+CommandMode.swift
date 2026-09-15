@@ -64,8 +64,19 @@ extension AppCoordinator {
             inserter: inserter,
             scanner: DangerousCommandScanner(),
             llm: InferenceClient(),
+            // Bounded to `SidecarReadinessPolicy.launchWaitDeadline` (2s), not Command
+            // Mode's 45s default: this closure runs after the readiness probe above has
+            // already decided to proceed, and only re-resolves the endpoint because
+            // `llama-server` binds a fresh port each launch. Without its own short bound
+            // it would inherit Command Mode's full 45s cold-start wait if the sidecar
+            // idle-unloaded in the gap between that probe and this call — the exact race
+            // this parameterization closes. `.notice` because that race, like the probe
+            // itself, resolves to dictation's designed raw-insert fallback, not a failure.
             resolveEndpoint: { [weak self] in
-                try await Self.resolveLiveSidecarEndpoint(from: self)
+                try await Self.resolveLiveSidecarEndpoint(
+                    from: self,
+                    timeout: SidecarReadinessPolicy.launchWaitDeadline,
+                    severity: .notice)
             },
             tonePreset: { [weak self] in
                 self?.settings.tone.defaultPreset ?? .asIs
@@ -73,8 +84,21 @@ extension AppCoordinator {
             cleanupEnabled: { [weak self] in
                 self?.settings.dictation.cleanupEnabled ?? true
             },
-            sidecarReady: { [weak self] in
-                await self?.isDictationSidecarReady() ?? false
+            sidecarReadiness: { [weak self] in
+                guard let self else { return .unavailable }
+                let manager = await MainActor.run { self.sidecarManagerInstance }
+                guard let manager else { return .unavailable }
+                let state = await manager.state
+                return SidecarReadinessPolicy.readiness(for: state)
+            },
+            awaitSidecarReady: { [weak self] deadline in
+                guard let self else { return false }
+                let manager = await MainActor.run { self.sidecarManagerInstance }
+                guard let manager else { return false }
+                return await awaitDictationSidecarReady(manager: manager, appLog: self.appLog, deadline: deadline)
+            },
+            noteSidecarActivity: { [weak self] in
+                await self?.noteLLMActivity()
             },
             appendHistory: { [weak self] entry in
                 self?.recordDictationCompletion(entry.cleaned ?? entry.transcript)
@@ -145,10 +169,18 @@ extension AppCoordinator {
     /// awaited off the main actor as before, relying on
     /// `SidecarLifecycleController.startIfNeeded`'s existing idempotency.
     ///
-    /// Dictation must **not** take this 45s wait when the Sidecar is cold — it probes
-    /// `isDictationSidecarReady()` (current `SidecarState` only) and inserts raw.
+    /// Dictation must **not** take Command Mode's 45s cold-start wait: its `resolveEndpoint`
+    /// closure (above) passes `timeout: SidecarReadinessPolicy.launchWaitDeadline` (2s) so
+    /// this function itself enforces the bound, structurally closing the idle-unload race
+    /// between the readiness probe and this call (rather than relying on the probe alone).
+    /// Command Mode's own call site below is unparameterized, so its `timeout: TimeInterval
+    /// = 45` default keeps its behavior — including a genuine timeout logging at `.error`
+    /// via the shared `LiveSidecarRouterError.sidecarUnavailable` throw — byte-for-byte
+    /// identical to before this function grew a `timeout`/`severity` parameter.
     private static func resolveLiveSidecarEndpoint(
-        from coordinator: AppCoordinator?
+        from coordinator: AppCoordinator?,
+        timeout: TimeInterval = 45,
+        severity: AppLog.Level = .error
     ) async throws -> LLMEndpoint {
         guard let coordinator else {
             throw LiveSidecarRouterError.sidecarUnavailable
@@ -167,7 +199,17 @@ extension AppCoordinator {
             coordinator.appLog?.log("Failed to start the LLM Sidecar: \(error)", level: .error)
             throw LiveSidecarRouterError.sidecarUnavailable
         }
-        guard let endpoint = await waitForSidecarReady(manager, appLog: coordinator.appLog, timeout: 45)
+        guard
+            let endpoint = await waitForSidecarReady(
+                manager,
+                appLog: coordinator.appLog,
+                timeout: timeout,
+                timeoutMessage:
+                    "Sidecar endpoint resolution: timed out after \(timeout)s waiting for .ready.",
+                failedMessage: { reason in
+                    "Sidecar endpoint resolution: reached .failed(\(reason)) while waiting for .ready."
+                },
+                severity: severity)
         else {
             throw LiveSidecarRouterError.sidecarUnavailable
         }
@@ -177,36 +219,28 @@ extension AppCoordinator {
         return endpoint
     }
 
-    /// Probe current `SidecarState` only — never `startIfNeeded` / never the 45s
-    /// `resolveLiveSidecarEndpoint` wait. A cold Sidecar inserts raw this utterance;
-    /// `startIfNeeded` is kicked off in the background so the *next* utterance can
-    /// clean up.
-    private func isDictationSidecarReady() async -> Bool {
-        let manager = await MainActor.run { sidecarManagerInstance }
-        guard let manager else {
-            warmDictationSidecarInBackground()
-            return false
-        }
-        if case .ready = await manager.state {
-            return true
-        }
-        warmDictationSidecarInBackground()
-        return false
-    }
+}
 
-    /// Fire-and-forget Sidecar start. Must not be awaited on the insert path.
-    private func warmDictationSidecarInBackground() {
-        Task { [weak self] in
-            guard let self else { return }
-            guard
-                let (manager, model) = await MainActor.run(body: {
-                    self.ensureSidecarManagerIfModelProvisioned()
-                })
-            else { return }
-            try? await manager.startIfNeeded(model: model)
-        }
-    }
-
+/// Dictation's `awaitSidecarReady` closure body (`makeDictationDriver`, above), split out
+/// to a free function purely to keep that initializer call under SwiftLint's
+/// function-body-length ceiling — no behavior change. `SidecarReadinessPolicy`'s bounded
+/// wait on a *launching* sidecar is the designed, expected path (falls back to a raw
+/// insert on timeout), not a failure, so — unlike the Phase-3 debug hook's default
+/// copy/severity on `waitForSidecarReady` — this logs honestly at `.notice`.
+private func awaitDictationSidecarReady(
+    manager: SidecarManager, appLog: AppLog?, deadline: TimeInterval
+) async -> Bool {
+    let endpoint = await waitForSidecarReady(
+        manager,
+        appLog: appLog,
+        timeout: deadline,
+        timeoutMessage:
+            "Dictation: sidecar still launching after \(deadline)s — inserting the raw transcript.",
+        failedMessage: { reason in
+            "Dictation: sidecar reached .failed(\(reason)) while launching — inserting the raw transcript."
+        },
+        severity: .notice)
+    return endpoint != nil
 }
 
 private enum LiveSidecarRouterError: LocalizedError {

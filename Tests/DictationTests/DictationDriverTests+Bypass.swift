@@ -20,7 +20,7 @@ extension DictationDriverTests {
             llm: llm,
             resolveEndpoint: { dictationTestEndpoint() },
             cleanupEnabled: { false },
-            sidecarReady: { true })
+            sidecarReadiness: { .ready })
 
         let resolved = expectation(description: "result delivered")
         driver.onUpdate = { update in
@@ -52,7 +52,7 @@ extension DictationDriverTests {
             llm: llm,
             resolveEndpoint: { dictationTestEndpoint() },
             cleanupEnabled: { false },
-            sidecarReady: { false })
+            sidecarReadiness: { .unavailable })
 
         let resolved = expectation(description: "result delivered")
         driver.onUpdate = { update in
@@ -84,7 +84,7 @@ extension DictationDriverTests {
             inserter: inserter,
             llm: llm,
             resolveEndpoint: { dictationTestEndpoint() },
-            sidecarReady: { false })
+            sidecarReadiness: { .unavailable })
 
         let resolved = expectation(description: "result delivered")
         driver.onUpdate = { update in
@@ -120,7 +120,7 @@ extension DictationDriverTests {
             inserter: inserter,
             llm: llm,
             resolveEndpoint: { dictationTestEndpoint() },
-            sidecarReady: { false })
+            sidecarReadiness: { .unavailable })
 
         let resolved = expectation(description: "result delivered")
         driver.onUpdate = { update in
