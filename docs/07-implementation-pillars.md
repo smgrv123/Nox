@@ -87,6 +87,24 @@ Explicit-only vocabulary store consumed by Whisper and cleanup.
 | **Depends on** | **P4** (registry/GBNF/executor), **P5a** (prompt slots) |
 | **Done =** | "correct that: X should be Y" → next dictation is biased and substitutions apply; wipe-history spares the dictionary. |
 
+### P5d · Streaming Dictation Output
+Insert cleaned text progressively instead of all at once on release.
+
+> **Not specced — needs design work before a PRD.** Registered here so the idea has a home,
+> not because the approach is settled.
+
+| | |
+|---|---|
+| **Contains** | Streamed LLM cleanup (`stream: true`, already supported by `InferenceClient`) with progressive insertion at the caret, replacing P5a's atomic batch-on-release insert. |
+| **Depends on** | **P5a** (the cleanup + insertion path it replaces) |
+| **Targets** | *Perceived* latency only — total wall-clock is unchanged or slightly worse. Measured baseline: `audio 25.2s · stt 1.76s · cleanup 8.97s · insert 0.43s`. Today the user sees nothing until the whole pipeline finishes. |
+| **Open questions (grill before speccing)** | Insertion is **paste-only** (ADR A8) — streaming means repeated ⌘V, each clobbering and restoring the clipboard, into an app that may reorder or coalesce. Can partial output be un-inserted if cleanup later revises earlier text? The terminal scan (P3 C11) runs on the exact string about to be inserted — streaming breaks that invariant, since no chunk is the final string. Confirm-Back cannot gate text already inserted. Does progressive insert interact safely with `pendingInsert` supersession (see `bugs.md` B1)? |
+| **Done =** | *TBD — do not write acceptance criteria until the safety questions above are answered.* |
+
+> P5a explicitly lists **"Streaming / partial insert — batch-on-release, atomic insert"** under
+> Out of Scope. P5d is where that decision gets revisited, and the terminal-scan invariant is
+> the reason it was deferred rather than an oversight.
+
 ### P6 · Assistant Intelligence
 Ask about the world and about the screen.
 
@@ -139,4 +157,5 @@ Each pillar gets, in order:
 | P4 Command Routing & Skills | **Complete** — headless Phases 1–7 (`plans/P4-command-routing-and-skills.md`) plus app-wiring Phases 1–6 (`plans/P4-app-wiring.md`) |
 | P5a Dictation Core | **Complete** — all 5 phases shipped on `feat/p5a-dictation-core` (`plans/P5a-dictation-core.md`); insertion is paste-only per ADR A8 |
 | P5b Personalization Dictionary | **Spec + plan authored** — implementation not started (`plans/P5b-personalization-dictionary.md`); execute after P5a |
+| P5d Streaming Dictation Output | **Idea only** — no spec, no plan. Needs design work on the terminal-scan and paste-only conflicts before a PRD is worth writing |
 | P6, P7 | Not started |
