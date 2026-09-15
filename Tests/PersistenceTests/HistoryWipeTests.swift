@@ -49,6 +49,12 @@ final class HistoryWipeTests: XCTestCase {
         }
     }
 
+    func testDictionaryFileOutOfScope() {
+        XCTAssertFalse(
+            wipe.isInScope(layout.dictionaryFile),
+            "a default history wipe must never delete dictionary.json")
+    }
+
     func testPreservedPathsAreSettingsScriptsDictionaryAndNonHistoryLogs() {
         // §2.6: a default wipe never touches settings/scripts/dictionary, and spares
         // the non-history logs (app.log, sidecar.log) and calibration.jsonl.

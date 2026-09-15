@@ -26,18 +26,17 @@ extension AppCoordinator {
             modelURL: AppCoordinator.modelsDirectory.blobURL(for: resolvedSttModelDescriptor))
         let capture = AudioCapture()
         let preGate = SegmentPreGate(thresholds: .provisional)
-        let dictionary = makeDictionaryStore()
         let installedApps: any InstalledApplicationCatalog = InstalledApplicationCatalogLive()
         let makePrompt = makeBiasInitialPrompt(
-            engine: engine, dictionary: dictionary, installedApps: installedApps)
+            engine: engine, dictionary: dictionaryStore, installedApps: installedApps)
 
         let dictation = await makeDictationDriver(
             engine: engine, capture: capture, preGate: preGate,
             makeInitialPrompt: makePrompt,
-            dictionarySubstitutions: makeDictionarySubstitutions(dictionary))
+            dictionarySubstitutions: makeDictionarySubstitutions(dictionaryStore))
         let command = await makeCommandModeDriver(
             engine: engine, capture: capture, preGate: preGate,
-            dictionary: dictionary, makeInitialPrompt: makePrompt)
+            dictionary: dictionaryStore, makeInitialPrompt: makePrompt)
         let mux = MuxVoiceSessionDriver(command: command, dictation: dictation)
 
         voiceSession = VoiceSessionCoordinator(
@@ -172,11 +171,6 @@ extension AppCoordinator {
                 try await Self.resolveLiveSidecarEndpoint(from: self)
             }
         )
-    }
-
-    private func makeDictionaryStore() -> DictionaryStore? {
-        guard let storage else { return nil }
-        return DictionaryStore(fileURL: storage.dictionaryFile)
     }
 
     private func makeDictionarySubstitutions(

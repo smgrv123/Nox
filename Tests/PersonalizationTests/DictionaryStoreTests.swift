@@ -137,4 +137,76 @@ final class DictionaryStoreTests: XCTestCase {
         XCTAssertEqual(restored.first?.mishearings, ["kubernetis"])
         XCTAssertEqual(restored.first?.occurrenceCount, 3)
     }
+
+    func testReplaceAllClearsFile() async throws {
+        let store = makeStore()
+        try await store.record(mishearing: "cooper nettie's", correct: "Kubernetes", source: .explicit)
+        let before = await store.allEntries()
+        XCTAssertEqual(before.count, 1)
+
+        try await store.replaceAll([])
+
+        let cleared = await store.allEntries()
+        XCTAssertEqual(cleared, [])
+        let reloaded = makeStore()
+        await reloaded.load()
+        let restoredEmpty = await reloaded.allEntries()
+        XCTAssertEqual(restoredEmpty, [])
+        XCTAssertTrue(fileManager.fileExists(atPath: fileURL.path))
+    }
+
+    func testAddExplicitEmptyMishearingCreatesPromotedEntry() async throws {
+        let store = makeStore()
+        try await store.addExplicit(correctTerm: "Kubernetes", mishearing: "")
+
+        let entries = await store.allEntries()
+        XCTAssertEqual(entries.count, 1)
+        XCTAssertEqual(entries.first?.correctTerm, "Kubernetes")
+        XCTAssertEqual(entries.first?.mishearings, [])
+        XCTAssertEqual(entries.first?.source, .explicit)
+        XCTAssertTrue(entries.first?.promoted ?? false)
+        XCTAssertEqual(entries.first?.createdAt, now)
+        XCTAssertEqual(entries.first?.lastUsedAt, now)
+    }
+
+    func testAddExplicitEmptyCorrectTermThrowsInvalidTermPair() async {
+        let store = makeStore()
+
+        do {
+            try await store.addExplicit(correctTerm: "", mishearing: "")
+            XCTFail("expected DictionaryStoreError.invalidTermPair")
+        } catch let error as DictionaryStoreError {
+            XCTAssertEqual(error, .invalidTermPair)
+        } catch {
+            XCTFail("expected DictionaryStoreError.invalidTermPair, got \(error)")
+        }
+
+        do {
+            try await store.addExplicit(correctTerm: "   ", mishearing: "")
+            XCTFail("expected DictionaryStoreError.invalidTermPair")
+        } catch let error as DictionaryStoreError {
+            XCTAssertEqual(error, .invalidTermPair)
+        } catch {
+            XCTFail("expected DictionaryStoreError.invalidTermPair, got \(error)")
+        }
+    }
+
+    func testAddExplicitNonEmptyMishearingPersistsPair() async throws {
+        let store = makeStore()
+        try await store.addExplicit(correctTerm: "Kubernetes", mishearing: "cooper nettie's")
+
+        let live = await store.allEntries()
+        XCTAssertEqual(live.count, 1)
+        XCTAssertEqual(live.first?.correctTerm, "Kubernetes")
+        XCTAssertEqual(live.first?.mishearings, ["cooper nettie's"])
+        XCTAssertEqual(live.first?.occurrenceCount, 1)
+        XCTAssertEqual(live.first?.source, .explicit)
+        XCTAssertTrue(live.first?.promoted ?? false)
+
+        let reloaded = makeStore()
+        await reloaded.load()
+        let restored = await reloaded.allEntries()
+        XCTAssertEqual(restored.map(\.correctTerm), ["Kubernetes"])
+        XCTAssertEqual(restored.first?.mishearings, ["cooper nettie's"])
+    }
 }

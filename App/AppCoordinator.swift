@@ -9,6 +9,7 @@ import Onboarding
 import Overlay
 import Permissions
 import Persistence
+import Personalization
 import VoiceSession
 import os
 
@@ -146,6 +147,14 @@ final class AppCoordinator: ObservableObject {
     /// first launch (User Stories 33, 35). Later P1 phases (settings, history, wipe)
     /// read their paths from `storage`.
     private(set) var storage: StorageLayout?
+
+    /// Shared `dictionary.json` actor — created with storage so Command Mode, Dictation
+    /// closures, and the Dictionary Settings pane mutate one in-memory document.
+    private(set) var dictionaryStore: DictionaryStore?
+
+    /// Snapshot for the Dictionary pane. Reloaded on appear and after each mutation
+    /// via `AppCoordinator+Dictionary.swift`.
+    @Published var dictionaryEntries: [DictionaryEntry] = []
     private(set) var appLog: AppLog?
 
     /// The settings load/save façade, bound to `storage.settingsFile` once storage is
@@ -306,6 +315,7 @@ final class AppCoordinator: ObservableObject {
             let log = AppLog(fileURL: layout.appLogFile)
             log.log("Aide \(Build.version) launched (pid \(ProcessInfo.processInfo.processIdentifier)).")
             storage = layout
+            dictionaryStore = DictionaryStore(fileURL: layout.dictionaryFile)
             appLog = log
             loadSettings(from: layout, log: log)
         } catch {

@@ -194,9 +194,9 @@ Pane UI is manual.
 
 ### Acceptance criteria
 
-- [ ] Pane lists / add / delete / reset work manually.
-- [ ] Wipe history does not delete `dictionary.json`.
-- [ ] Per-phase gate green.
+- [x] Pane lists / add / delete / reset work manually.
+- [x] Wipe history does not delete `dictionary.json`.
+- [x] Per-phase gate green.
 
 ---
 

@@ -98,6 +98,43 @@ public actor DictionaryStore {
         }
     }
 
+    public func replaceAll(_ entries: [DictionaryEntry]) throws {
+        try persist { document in
+            document.entries = entries
+        }
+    }
+
+    /// Settings-pane add: `correctTerm` is required; `mishearing` may be empty so the
+    /// user can stash custom vocabulary before any STT variant is known.
+    public func addExplicit(correctTerm: String, mishearing: String) throws {
+        let heard = mishearing.trimmingCharacters(in: .whitespacesAndNewlines)
+        if heard.isEmpty {
+            let term = correctTerm.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !term.isEmpty else { throw DictionaryStoreError.invalidTermPair }
+            let now = clock()
+            try persist { document in
+                if let index = document.entries.firstIndex(where: {
+                    $0.correctTerm.caseInsensitiveCompare(term) == .orderedSame
+                }) {
+                    document.entries[index].lastUsedAt = now
+                } else {
+                    document.entries.append(
+                        DictionaryEntry(
+                            id: makeID(),
+                            correctTerm: term,
+                            mishearings: [],
+                            occurrenceCount: 1,
+                            promoted: false,
+                            source: .explicit,
+                            createdAt: now,
+                            lastUsedAt: now))
+                }
+            }
+            return
+        }
+        try record(mishearing: heard, correct: correctTerm, source: .explicit)
+    }
+
     public func allEntries() -> [DictionaryEntry] {
         ensureLoaded()
         return document.entries

@@ -28,6 +28,9 @@ struct SettingsRootView: View {
             SettingsPane(id: "dictation", title: "Dictation", systemImage: "mic") {
                 DictationPane(coordinator: coordinator)
             },
+            SettingsPane(id: "dictionary", title: "Dictionary", systemImage: "text.book.closed") {
+                DictionaryPane(coordinator: coordinator)
+            },
             SettingsPane(id: "data", title: "Data", systemImage: "trash") {
                 DataPane(coordinator: coordinator)
             },
