@@ -167,9 +167,9 @@ GBNF is generated from manifests — no hand-edited `.gbnf` file. Confirm `FileS
 
 ### Acceptance criteria
 
-- [ ] Named tests pass.
-- [ ] Manual: after `correct_that`, dictation cleanup prompt (visible in a debug log **only if one already exists** — do not add telemetry) / behavior replaces the mishearing. If no log exists, the driver test is the gate; manual is best-effort.
-- [ ] Per-phase gate green.
+- [x] Named tests pass.
+- [x] Manual: after `correct_that`, dictation cleanup prompt (visible in a debug log **only if one already exists** — do not add telemetry) / behavior replaces the mishearing. If no log exists, the driver test is the gate; manual is best-effort.
+- [x] Per-phase gate green.
 
 ---
 

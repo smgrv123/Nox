@@ -32,7 +32,9 @@ extension AppCoordinator {
             engine: engine, dictionary: dictionary, installedApps: installedApps)
 
         let dictation = await makeDictationDriver(
-            engine: engine, capture: capture, preGate: preGate, makeInitialPrompt: makePrompt)
+            engine: engine, capture: capture, preGate: preGate,
+            makeInitialPrompt: makePrompt,
+            dictionarySubstitutions: makeDictionarySubstitutions(dictionary))
         let command = await makeCommandModeDriver(
             engine: engine, capture: capture, preGate: preGate,
             dictionary: dictionary, makeInitialPrompt: makePrompt)
@@ -63,7 +65,8 @@ extension AppCoordinator {
         engine: any STTEngine,
         capture: any AudioCaptureBuffer,
         preGate: SegmentPreGate,
-        makeInitialPrompt: @escaping @Sendable () async -> String?
+        makeInitialPrompt: @escaping @Sendable () async -> String?,
+        dictionarySubstitutions: @escaping @Sendable () async -> String
     ) async -> DictationDriver {
         let inserter = await MainActor.run { TextInserterLive() }
         return DictationDriver(
@@ -110,6 +113,7 @@ extension AppCoordinator {
                 await self?.noteLLMActivity()
             },
             makeInitialPrompt: makeInitialPrompt,
+            dictionarySubstitutions: dictionarySubstitutions,
             appendHistory: { [weak self] entry in
                 self?.recordDictationCompletion(entry.cleaned ?? entry.transcript)
                 guard let storage = self?.storage else { return }
@@ -173,6 +177,16 @@ extension AppCoordinator {
     private func makeDictionaryStore() -> DictionaryStore? {
         guard let storage else { return nil }
         return DictionaryStore(fileURL: storage.dictionaryFile)
+    }
+
+    private func makeDictionarySubstitutions(
+        _ dictionary: DictionaryStore?
+    ) -> @Sendable () async -> String {
+        {
+            guard let dictionary else { return "" }
+            let entries = await dictionary.promotedEntries()
+            return SubstitutionListBuilder.build(promotedEntries: entries)
+        }
     }
 
     /// Shared Whisper `initialPrompt` for Command Mode and Dictation: ranked dictionary

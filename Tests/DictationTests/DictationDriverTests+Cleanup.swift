@@ -126,4 +126,34 @@ extension DictationDriverTests {
         let chatCount = await llm.chatCallCount
         XCTAssertEqual(chatCount, 0, "dictation must never implicitly offload to a non-local endpoint")
     }
+
+    func testCleanupPromptContainsSubstitution() async throws {
+        let marker = "`cooper nettie's` -> `Kubernetes`"
+        let llm = MockLLMClient()
+        await llm.setChatChunks(.success([ChatCompletionChunk(delta: "Cleaned.", isFinal: true)]))
+        let inserter = RecordingInserter()
+        let driver = makeDictationDriver(
+            engine: MockSTTEngine(returning: passingTranscription()),
+            capture: FakeCaptureBuffer(finalizeReturns: dictationTestPCM),
+            inserter: inserter,
+            llm: llm,
+            resolveEndpoint: { dictationTestEndpoint() },
+            dictionarySubstitutions: { marker })
+
+        let resolved = expectation(description: "result delivered")
+        driver.onUpdate = { if case .result = $0 { resolved.fulfill() } }
+
+        driver.begin(mode: .dictation)
+        driver.end()
+        await fulfillment(of: [resolved], timeout: 2)
+
+        let chatCount = await llm.chatCallCount
+        XCTAssertEqual(chatCount, 2)
+        let messages = await llm.lastChatMessages
+        let user = messages?.first(where: { $0.role == .user })?.content
+        let prompt = try XCTUnwrap(user)
+        XCTAssertTrue(
+            prompt.contains(marker),
+            "cleanup prompt must include the injected dictionary substitution list")
+    }
 }

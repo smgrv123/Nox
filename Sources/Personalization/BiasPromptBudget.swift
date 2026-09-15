@@ -14,15 +14,16 @@ public enum BiasPromptBudget {
             * RecencyWeight.weight(lastUsedAt: lastUsedAt, now: now, halfLifeDays: halfLifeDays)
     }
 
-    public static func rankedCorrectTerms(
+    /// Score descending, `correctTerm` ascending. Does not filter `promoted`.
+    public static func rankedEntries(
         _ entries: [DictionaryEntry],
         now: Date,
         halfLifeDays: Double
-    ) -> [String] {
+    ) -> [DictionaryEntry] {
         entries
             .map { entry in
                 (
-                    term: entry.correctTerm,
+                    entry: entry,
                     score: score(
                         occurrenceCount: entry.occurrenceCount,
                         lastUsedAt: entry.lastUsedAt,
@@ -32,9 +33,17 @@ public enum BiasPromptBudget {
             }
             .sorted { lhs, rhs in
                 if lhs.score != rhs.score { return lhs.score > rhs.score }
-                return lhs.term < rhs.term
+                return lhs.entry.correctTerm < rhs.entry.correctTerm
             }
-            .map(\.term)
+            .map(\.entry)
+    }
+
+    public static func rankedCorrectTerms(
+        _ entries: [DictionaryEntry],
+        now: Date,
+        halfLifeDays: Double
+    ) -> [String] {
+        rankedEntries(entries, now: now, halfLifeDays: halfLifeDays).map(\.correctTerm)
     }
 
     /// Append `terms` in order onto `chosen`, stopping before the joined string would
