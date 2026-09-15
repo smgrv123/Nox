@@ -1,4 +1,5 @@
 import AideCore
+import Permissions
 import SwiftUI
 
 /// The `MenuBarExtra` menu content (User Stories 3, 4): a thin SwiftUI shell that
@@ -46,6 +47,39 @@ struct MenubarMenu: View {
             }
             Divider()
         }
+
+        // P5a (User Story 20): Accessibility has no in-app prompt (`canRequestInApp ==
+        // false`). Live-query the shared gate so the menubar deep-links to Privacy →
+        // Accessibility without a published coordinator field; Overlay stays text-only
+        // (plan: do not invent Overlay buttons). Settings Permissions already deep-links.
+        if let accessibilityFixIt = coordinator.permissionGate.advice(for: .accessibility) {
+            Text(accessibilityFixIt.hint)
+                .font(.caption)
+                .foregroundStyle(.orange)
+            Button("Open \(accessibilityFixIt.permission.displayName) Settings…") {
+                coordinator.openFixIt(accessibilityFixIt)
+            }
+            Divider()
+        }
+
+        // P5a fix-it: dictation pastes via a synthetic ⌘V, and macOS gives no reliable
+        // signal that the target app actually consumed it — a paste can silently fail
+        // while Aide still reports success. Rather than build unreliable verification,
+        // recovery is made trivial: put the last dictation's text back on the
+        // clipboard in one click. Disabled (not hidden) before the first dictation
+        // this launch, matching the existing convention for unavailable actions
+        // (`SettingsLink`/`Quit` are always enabled; this is the menu's first
+        // conditionally-disabled item, so it sets the pattern rather than following
+        // one).
+        Button("Copy Last Dictation") {
+            if let text = coordinator.lastDictationText {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(text, forType: .string)
+            }
+        }
+        .disabled(coordinator.lastDictationText == nil)
+
+        Divider()
 
         SettingsLink {
             Text("Settings…")

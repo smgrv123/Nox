@@ -62,7 +62,10 @@ public final class InferenceClient: LLMClient, @unchecked Sendable {
             topLogprobs: Self.routeCompleteTopLogprobs,
             // Passthrough, unmodified — even an empty grammar string is still sent
             // explicitly rather than the key being omitted (see the DTO's doc comment).
-            grammar: grammar)
+            grammar: grammar,
+            // GBNF-constrained routing already decodes in 26-37 tokens and must never
+            // change behavior — this path has no SamplingParams to opt out with anyway.
+            chatTemplateKwargs: nil)
 
         let request = try makeRequest(endpoint: endpoint, body: body)
         let (data, response) = try await session.data(for: request)
@@ -96,7 +99,9 @@ public final class InferenceClient: LLMClient, @unchecked Sendable {
             stream: stream,
             logprobs: params.topLogprobs > 0,
             topLogprobs: params.topLogprobs > 0 ? params.topLogprobs : nil,
-            grammar: nil)
+            grammar: nil,
+            chatTemplateKwargs: params.disableThinking
+                ? ChatCompletionRequestBody.ChatTemplateKwargs(enableThinking: false) : nil)
 
         let request = try makeRequest(endpoint: endpoint, body: body)
         return stream ? try await streamedCompletion(request: request) : try await bufferedCompletion(request: request)

@@ -29,14 +29,19 @@ final class LLMClientWireTypesTests: XCTestCase {
         XCTAssertEqual(defaults.topP, 1.0)
         XCTAssertNil(defaults.maxTokens)
         XCTAssertEqual(defaults.topLogprobs, 0, "logprobs must be opt-in, not requested by default")
+        XCTAssertFalse(
+            defaults.disableThinking,
+            "model-side reasoning must stay on unless a caller opts out — command-mode routing depends on this")
     }
 
     func testSamplingParamsCustomValuesRoundTrip() {
-        let params = SamplingParams(temperature: 0.1, topP: 0.9, maxTokens: 256, topLogprobs: 3)
+        let params = SamplingParams(
+            temperature: 0.1, topP: 0.9, maxTokens: 256, topLogprobs: 3, disableThinking: true)
         XCTAssertEqual(params.temperature, 0.1)
         XCTAssertEqual(params.topP, 0.9)
         XCTAssertEqual(params.maxTokens, 256)
         XCTAssertEqual(params.topLogprobs, 3)
+        XCTAssertTrue(params.disableThinking)
     }
 
     // MARK: - TokenLogprob

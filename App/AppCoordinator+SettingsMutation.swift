@@ -46,6 +46,20 @@ extension AppCoordinator {
         overlay.applyIndicatorSettings(settings.indicators)
     }
 
+    /// Default dictation tone preset (P5a Phase 4). Voice prefixes still override
+    /// this per utterance. Unknown JSON is rejected at decode; the setter takes
+    /// `Settings.TonePreset` so the pane cannot persist a case cleanup doesn't know.
+    func setDefaultTonePreset(_ preset: Settings.TonePreset) {
+        guard settings.tone.defaultPreset != preset else { return }
+        updateSettings { $0.tone.defaultPreset = preset }
+    }
+
+    /// Master cleanup toggle (P5a locked bypass). Off → always insert raw.
+    func setDictationCleanupEnabled(_ enabled: Bool) {
+        guard settings.dictation.cleanupEnabled != enabled else { return }
+        updateSettings { $0.dictation.cleanupEnabled = enabled }
+    }
+
     // MARK: - Hotkey rebinding (PHASE 9; User Stories 13, 14, 29)
 
     /// Rebind one semantic hotkey to a freshly captured chord (already validated by

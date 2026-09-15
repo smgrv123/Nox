@@ -44,7 +44,7 @@ import Persistence
 /// idle-unload: 16GB after `IdleUnloadPolicy.tier16IdleThreshold` (3min, since the
 /// resident Qwen3-8B costs ~4.7GB of RAM held indefinitely otherwise), 8GB after
 /// `IdleUnloadPolicy.defaultIdleThreshold` (5min, unchanged) — the tier-appropriate
-/// threshold is resolved and passed explicitly in `ensureSidecarManager(model:)` below.
+/// threshold is resolved and passed explicitly in `ensureSidecarManager()` below.
 ///
 extension AppCoordinator {
 
@@ -95,7 +95,7 @@ extension AppCoordinator {
     /// time. `SidecarLifecycleController` evaluates `IdleUnloadPolicy` on each
     /// ready-poll tick and stops the process when the tier-appropriate idle threshold
     /// is exceeded — 16GB at 3 minutes, 8GB at 5 minutes (see
-    /// `ensureSidecarManager(model:)`'s doc comment). The idle timer resets via
+    /// `ensureSidecarManager()`'s doc comment). The idle timer resets via
     /// `recordActivity()` (called by `noteLLMActivity()` and `startIfNeeded`).
     /// Subsequent launches skip onboarding, so Qwen provisioning never runs and the
     /// Sidecar would stay down — Command Mode then cannot route. If the provisioned
@@ -109,12 +109,12 @@ extension AppCoordinator {
 
     func startProductionSidecar(model: ModelDescriptor) {
         // `startProductionSidecar` itself is nonisolated (unchanged signature — see
-        // `ensureSidecarManager(model:)`'s doc comment for why) so it can keep being
+        // `ensureSidecarManager()`'s doc comment for why) so it can keep being
         // called synchronously from both of its guaranteed-main-thread callers:
         // `applicationDidFinishLaunching()` (an `NSApplicationDelegate` hook, always
         // main-thread per AppKit) and `handleLlmProvisioning` (`@MainActor`).
         // `assumeIsolated` asserts that invariant rather than silently trusting it.
-        guard let manager = MainActor.assumeIsolated({ ensureSidecarManager(model: model) }) else {
+        guard let manager = MainActor.assumeIsolated({ ensureSidecarManager() }) else {
             return
         }
 
@@ -140,9 +140,12 @@ extension AppCoordinator {
     /// `SidecarLifecycleController.startIfNeeded` is already idempotent once callers
     /// share an instance (`guard lifecycleTask == nil`), so this only needs to fix
     /// *which* instance gets built and assigned — not re-implement that idempotency.
+    ///
+    /// Model-agnostic by design: the manager isn't bound to any particular
+    /// `ModelDescriptor` — a descriptor is only supplied later, to `startIfNeeded`, by
+    /// whichever caller actually starts the Sidecar.
     @MainActor
-    func ensureSidecarManager(model: ModelDescriptor) -> SidecarManager? {
-        productionSidecarModel = model
+    func ensureSidecarManager() -> SidecarManager? {
         if let existing = sidecarManagerInstance {
             return existing
         }
@@ -180,11 +183,11 @@ extension AppCoordinator {
         return manager
     }
 
-    /// `ensureSidecarManager(model:)`'s counterpart for Command Mode's router: resolves
+    /// `ensureSidecarManager()`'s counterpart for Command Mode's router: resolves
     /// the Qwen descriptor, reuses `sidecarManagerInstance` if already built, or
     /// constructs one — gated on the model actually being provisioned on disk, exactly
     /// mirroring `startSidecarIfModelReady()`'s guard above — if not. `@MainActor` for
-    /// the same reason as `ensureSidecarManager(model:)`: `resolveLiveSidecarEndpoint`
+    /// the same reason as `ensureSidecarManager()`: `resolveLiveSidecarEndpoint`
     /// calls this from the router's cooperative thread pool, never the main thread.
     @MainActor
     func ensureSidecarManagerIfModelProvisioned() -> (manager: SidecarManager, model: ModelDescriptor)? {
@@ -194,27 +197,34 @@ extension AppCoordinator {
         }
         let blobURL = AppCoordinator.modelsDirectory.blobURL(for: descriptor)
         guard FileManager.default.fileExists(atPath: blobURL.path) else { return nil }
-        guard let manager = ensureSidecarManager(model: descriptor) else { return nil }
+        guard let manager = ensureSidecarManager() else { return nil }
         return (manager, descriptor)
     }
 
     /// Record an LLM request, resetting the idle-unload countdown (Phase 6; LLD §5.4).
     /// If the Sidecar was idle-unloaded (`.stopped`), restarts it — the normal
-    /// `.launching` → `.ready` flow produces a brief visible loading state. Future LLM
-    /// consumers (P4/P5/P6) call this before every request. Its only caller
-    /// (`resolveLiveSidecarEndpoint`) runs off the main actor, so both
-    /// `sidecarManagerInstance` and `productionSidecarModel` reads are hopped onto the
-    /// main actor rather than read directly from that thread.
+    /// `.launching` → `.ready` flow produces a brief visible loading state. Callers run
+    /// off the main actor, so the manager lookup is hopped onto the main actor rather
+    /// than read directly from that thread.
+    ///
+    /// Goes through `ensureSidecarManagerIfModelProvisioned()` rather than reading
+    /// `sidecarManagerInstance` directly, because dictation now calls this at hotkey
+    /// key-down — which can be the first LLM activity of the whole session, before any
+    /// manager exists. Bailing on a nil instance would mean a fresh launch whose first
+    /// action is dictation never warms the Sidecar at all, and so never cleans up.
+    /// `ensureSidecarManagerIfModelProvisioned` still returns nil when the model blob
+    /// isn't downloaded, which remains the correct no-op.
     func noteLLMActivity() {
         Task {
-            guard let manager = await MainActor.run(body: { self.sidecarManagerInstance }) else {
-                return
-            }
+            guard
+                let (manager, model) = await MainActor.run(body: {
+                    self.ensureSidecarManagerIfModelProvisioned()
+                })
+            else { return }
             let appLog = self.appLog
             await manager.recordActivity()
             let state = await manager.state
             guard case .stopped = state else { return }
-            guard let model = await MainActor.run(body: { self.productionSidecarModel }) else { return }
             appLog?.log("Idle-unload: reloading Sidecar on new LLM request.", level: .notice)
             do {
                 try await manager.startIfNeeded(model: model)
@@ -298,10 +308,22 @@ private func resolveSidecarCheckConfig(
 /// one that matters here) until `.ready` yields a usable endpoint, `.failed` gives up, or
 /// `timeout` elapses. An internal (module-wide) free function — kept out of
 /// `AppCoordinator`'s extension to stay within SwiftLint's function-body-length ceiling.
+///
+/// The give-up copy and its severity are caller-supplied rather than fixed: this helper
+/// backs the Phase-3 debug hook (where a timeout genuinely means "the manual chat() probe
+/// below won't run — that's worth an `.error`"), but also backs dictation's bounded
+/// readiness waits, where a short timeout on a cold sidecar is the designed, expected
+/// outcome (falls back to a raw insert) and logging it as `.error` would be a false alarm.
+/// Defaults reproduce the original debug-hook copy verbatim, so that caller is unchanged.
 func waitForSidecarReady(
     _ manager: SidecarManager,
     appLog: AppLog?,
-    timeout: TimeInterval = 60
+    timeout: TimeInterval = 60,
+    timeoutMessage: String = "Sidecar check: timed out waiting for .ready — skipping the debug chat() call.",
+    failedMessage: @escaping (String) -> String = { reason in
+        "Sidecar check: reached .failed(\(reason)) — skipping the debug chat() call."
+    },
+    severity: AppLog.Level = .error
 ) async -> LLMEndpoint? {
     let deadline = Date().addingTimeInterval(timeout)
     while Date() < deadline {
@@ -310,12 +332,12 @@ func waitForSidecarReady(
             return endpoint
         }
         if case .failed(let reason) = state {
-            appLog?.log("Sidecar check: reached .failed(\(reason)) — skipping the debug chat() call.", level: .error)
+            appLog?.log(failedMessage(reason), level: severity)
             return nil
         }
         try? await Task.sleep(for: .milliseconds(300))
     }
-    appLog?.log("Sidecar check: timed out waiting for .ready — skipping the debug chat() call.", level: .error)
+    appLog?.log(timeoutMessage, level: severity)
     return nil
 }
 

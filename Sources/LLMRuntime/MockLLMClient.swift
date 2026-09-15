@@ -11,6 +11,10 @@ public actor MockLLMClient: LLMClient {
     /// happened without a live Sidecar to observe.
     public private(set) var routeCompleteCallCount = 0
     public private(set) var chatCallCount = 0
+    /// Sampling params from the most recent `chat` call; nil until `chat` is invoked.
+    public private(set) var lastSamplingParams: SamplingParams?
+    /// User/system messages from the most recent `chat` call; nil until `chat` is invoked.
+    public private(set) var lastChatMessages: [ChatMessage]?
 
     private var routeCompletionResult: Result<RouterCompletion, Error>
     private var chatChunksResult: Result<[ChatCompletionChunk], Error>
@@ -61,6 +65,8 @@ public actor MockLLMClient: LLMClient {
         stream: Bool
     ) async throws -> ChatCompletionStream {
         chatCallCount += 1
+        lastSamplingParams = params
+        lastChatMessages = messages
         let chunks = try chatChunksResult.get()
         return ChatCompletionStream(chunks: chunks)
     }

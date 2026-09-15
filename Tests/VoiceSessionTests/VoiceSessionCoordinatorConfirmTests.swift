@@ -163,7 +163,12 @@ final class VoiceSessionCoordinatorConfirmTests: XCTestCase {
         confirmBackTimeout.fireOldest()
 
         XCTAssertEqual(overlay.state, .hidden, "the timeout dismisses the unanswered Confirm-Back")
-        XCTAssertEqual(driver.rejectCallCount, 1, "the timeout drops the stashed intent via the driver's reject hook")
+        XCTAssertEqual(
+            driver.confirmBackTimedOutCallCount, 1,
+            "the timeout drops the stashed intent via the driver's confirmBackTimedOut hook")
+        XCTAssertEqual(
+            driver.rejectCallCount, 0,
+            "a timeout must not look like an explicit user Reject to the driver")
         XCTAssertEqual(phase.phases.last, .idle)
 
         // The actual bug: with the Overlay stuck at .confirmBack, beginSession's
@@ -199,6 +204,7 @@ final class VoiceSessionCoordinatorConfirmTests: XCTestCase {
         sut.rejectConfirmBack()
 
         let rejectCallCountBeforeTimeout = driver.rejectCallCount
+        let timedOutCallCountBeforeTimeout = driver.confirmBackTimedOutCallCount
         let phasesBeforeTimeout = phase.phases
         XCTAssertEqual(overlay.state, .hidden, "a real Reject has already returned the Overlay to .hidden")
 
@@ -208,6 +214,9 @@ final class VoiceSessionCoordinatorConfirmTests: XCTestCase {
         XCTAssertEqual(
             driver.rejectCallCount, rejectCallCountBeforeTimeout,
             "the state guard must prevent a second driver.reject() from the stale timeout")
+        XCTAssertEqual(
+            driver.confirmBackTimedOutCallCount, timedOutCallCountBeforeTimeout,
+            "the state guard must prevent a stale timeout from firing confirmBackTimedOut after a real Reject")
         XCTAssertEqual(
             phase.phases, phasesBeforeTimeout,
             "the state guard must prevent a duplicate .idle report from the stale timeout")
@@ -238,6 +247,7 @@ final class VoiceSessionCoordinatorConfirmTests: XCTestCase {
         sut.approveConfirmBack()
 
         let rejectCallCountBeforeTimeout = driver.rejectCallCount
+        let timedOutCallCountBeforeTimeout = driver.confirmBackTimedOutCallCount
         XCTAssertEqual(overlay.state, .showingResult, "a real Approve has already moved past Confirm-Back")
 
         confirmBackTimeout.fireOldest()
@@ -246,6 +256,10 @@ final class VoiceSessionCoordinatorConfirmTests: XCTestCase {
         XCTAssertEqual(
             driver.rejectCallCount, rejectCallCountBeforeTimeout,
             "the state guard must prevent the stale timeout from rejecting an already-approved session")
+        XCTAssertEqual(
+            driver.confirmBackTimedOutCallCount, timedOutCallCountBeforeTimeout,
+            "the state guard must prevent the stale timeout from firing confirmBackTimedOut on an already-approved session"
+        )
     }
 }
 

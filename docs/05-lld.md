@@ -474,16 +474,11 @@ One document `settings.json`:
     "network_utilities_disclosed": false,
     "transcripts_retention": "keep",
     "wipe_scope_default": ["transcripts", "command_history", "script_logs"]
-  },
-
-  "text_insertion": {
-    "app_overrides": {
-      "com.microsoft.VSCode": "paste",
-      "com.google.Chrome": "paste"
-    }
   }
 }
 ```
+
+> Text Insertion has **no per-app setting** — `text_insertion.app_overrides` (the per-app AX/paste map) was removed along with AX insertion itself; every app gets the same paste-only path ([§4.7](#47-text-insertion-decision-paste-only--secure-input-precheck--clipboard-saverestore--terminal-app-detection)). A `text_insertion` key left over in an existing `settings.json` from before this reversal is simply ignored.
 
 > **BYOK secret handling (MUST):** the API key is stored in the macOS **Keychain**, never in `settings.json`. The file holds only a `keychain://` reference. `base_url` + `model` are non-secret. The same **LLMClient** ([§3.3](#33-llmclient-openai-compatible-local--cloud)) talks to local **llama-server** and to the BYOK endpoint; only the `base_url`/auth differ. Whenever a request will leave the machine, the **Local/Cloud Indicator** flips (privacy model, load-bearing).
 
@@ -717,20 +712,19 @@ enum SidecarState: Equatable {
 
 ### 3.5 TextInserter
 
-**AX-first**, clipboard-paste fallback with pasteboard save/restore, per-app allow/deny map (locked decision 7). Algorithm in [§4.7](#47-text-insertion-decision-ax-first--paste-fallback--clipboard-saverestore--terminal-app-detection).
+**Paste-only**: synthetic ⌘V via `NSPasteboard` with save/restore, and a Secure Input pre-check (locked decision 7, **reversed** — see [§4.7](#47-text-insertion-decision-paste-only--secure-input-precheck--clipboard-saverestore--terminal-app-detection) and `03-architecture.md` ADR A8). The original AX-first design and its `insertedViaAX` result case are gone: `AXUIElementSetAttributeValue` returned `.success` on acceptance, not on actually placing text, and had zero confirmed successes in real use.
 
 ```swift
-@MainActor                                   // all AX + synthetic events on main thread (§10)
+@MainActor                                   // AX-permission check + synthetic events on main thread (§10)
 protocol TextInserter {
     func insert(_ text: String, into target: FocusTarget) async -> InsertionResult
 }
 
-struct FocusTarget { let bundleID: String?; let axElement: AXUIElement? }
+struct FocusTarget { let bundleID: String?; let accessibilityTrusted: Bool }
 
 enum InsertionResult {
-    case insertedViaAX
     case insertedViaPaste             // pasteboard saved + restored
-    case failed(reason: String)       // both paths failed => surface, offer copy-to-clipboard
+    case failed(reason: String)       // Secure Input active, or paste failed => surface, offer copy-to-clipboard
 }
 ```
 
@@ -934,7 +928,7 @@ Explicit-only in v1. Two consumers stay bounded forever: the **Whisper bias prom
 2. Build the cleanup prompt ([§6.3](#63-dictation-tone-cleanup-prompt)) with: (a) the preset instruction block, (b) the bounded dictionary substitution list ([§4.5E](#45-personalization-dictionary-term-pair-extraction-promotion-threshold-mru-eviction-224-token-bias-prompt-budgeting)), (c) the raw transcript.
 3. Call `LLMClient.chat` at low temperature (PROVISIONAL `0.2`) on the **local** LLM (dictation never implicitly leaves the machine). Stream disabled — we insert atomically.
 4. Post-process: strip any accidental leading/trailing quotes or model preamble ("Here is the cleaned text:") via a fixed prefix-stripper; enforce the model returned *only* the rewritten text.
-5. Hand off to `TextInserter` ([§4.7](#47-text-insertion-decision-ax-first--paste-fallback--clipboard-saverestore--terminal-app-detection)).
+5. Hand off to `TextInserter` ([§4.7](#47-text-insertion-decision-paste-only--secure-input-precheck--clipboard-saverestore--terminal-app-detection)).
 
 **Per-preset behavior:**
 
@@ -947,23 +941,24 @@ Explicit-only in v1. Two consumers stay bounded forever: the **Whisper bias prom
 
 **Invariants (MUST):** cleanup **never adds new facts or answers questions** — it rewrites the dictated text only. Non-English / code-mixed (Hindi-English) input is preserved in the user's language mix unless a preset explicitly formalizes register; the pass does not translate.
 
-### 4.7 Text Insertion Decision (AX-first → paste fallback → clipboard save/restore → terminal-app detection)
+### 4.7 Text Insertion Decision (paste-only → Secure Input pre-check → clipboard save/restore → terminal-app detection)
 
-Implements `TextInserter` ([§3.5](#35-textinserter)). All AX calls and synthetic key events on the **main thread** ([§10](#10-concurrency--threading-detail)).
+Implements `TextInserter` ([§3.5](#35-textinserter)). All synthetic key events and the `AXIsProcessTrusted()` permission check run on the **main thread** ([§10](#10-concurrency--threading-detail)).
+
+**Reversed from the original AX-first design** (locked decision 7, amended; `03-architecture.md` ADR A8): `AXUIElementSetAttributeValue` on `kAXSelectedTextAttribute` returns `.success` when the attribute write is *accepted*, not when text is actually placed — Electron, Catalyst, and custom text views accept and silently discard it. Confirmed in live use (WhatsApp, Messages): "successful" AX insertions (2–26ms) with nothing appearing on screen, and the false success suppressed the paste fallback that would have worked. AX had zero confirmed successes in real use, so it — and the per-app allow/deny map that chose between AX and paste — were removed entirely, not deferred. Insertion is now **always** synthetic ⌘V via the pasteboard.
 
 **Steps:**
 
-1. **Resolve focus.** Get the system-wide focused `AXUIElement` and the frontmost app's `bundleID`.
-2. **Consult the per-app map** (`settings.text_insertion.app_overrides`): `"ax"` forces AX, `"paste"` forces paste. Default (unlisted) = try AX first.
-3. **Terminal-destination detection.** If `bundleID ∈ terminalAllowlist` (Terminal, iTerm2, Warp, Ghostty, kitty, Alacritty, WezTerm, …) **and** this is a **Dictation Mode** insertion, run the **Dangerous-Command Scanner** on the text first ([§4.3](#43-dangerous-command-scanner-tokenization--recursive-descent)) with `channel = .dictatedOneOff`, `destinationBundleID = bundleID`. A `confirm`/`hardBlock` verdict routes to Confirm-Back/Hard-Block **before** any characters are inserted.
-4. **AX path:** if AX allowed, attempt insertion via `AXUIElementSetAttributeValue` on `kAXSelectedTextAttribute` (replaces selection / inserts at caret) on a text-capable element. On success → `.insertedViaAX`.
-5. **Paste fallback** (AX denied/failed — common for Electron apps): 
-   a. **Save** the current `NSPasteboard.general` contents (all types) into a snapshot.
-   b. Set the pasteboard string to the text.
+1. **Resolve focus.** Get the frontmost app's `bundleID` and whether Accessibility is trusted (`AXIsProcessTrusted()`) — still required, because posting a synthetic ⌘V needs it exactly as the removed AX write did.
+2. **Terminal-destination detection.** If `bundleID ∈ terminalAllowlist` (Terminal, iTerm2, Warp, Ghostty, kitty, Alacritty, WezTerm, …) **and** this is a **Dictation Mode** insertion, run the **Dangerous-Command Scanner** on the text first ([§4.3](#43-dangerous-command-scanner-tokenization--recursive-descent)) with `channel = .dictatedOneOff`, `destinationBundleID = bundleID`. A `confirm`/`hardBlock` verdict routes to Confirm-Back/Hard-Block **before** any characters are inserted.
+3. **Secure Input pre-check.** Call `IsSecureEventInputEnabled()` (Carbon). If Secure Input is on (any password field focused anywhere on the system), a synthetic keystroke would be silently discarded, so insertion fails immediately with a human-readable reason — **before** touching the clipboard — rather than clobbering the user's clipboard for a paste that could never land.
+4. **Paste** (the only path):
+   a. **Save** the current `NSPasteboard.general` contents (all types, all items) into a snapshot.
+   b. Write the text as the pasteboard's string content **together with** `org.nspasteboard.ConcealedType` and `org.nspasteboard.TransientType` marker data, in one `declareTypes`/write batch — so a clipboard manager observing the change sees the markers on the same event as the string, not after. This is a convention some managers (Raycast, Maccy, Alfred, Paste, …) honor to skip recording the item into history; it is not enforced by macOS.
    c. Synthesize `Cmd+V` (CGEvent keyDown/keyUp) into the focused app.
-   d. After a short settle delay (PROVISIONAL 80ms; ideally await paste completion where observable) **restore** the saved pasteboard snapshot.
+   d. After a settle delay (400ms — was PROVISIONAL 80ms, found too short: an app under load, e.g. `xcodebuild` running in the background, can easily exceed it, the leading explanation for an observed silent paste failure in Ghostty) **restore** the saved pasteboard snapshot.
    → `.insertedViaPaste`.
-6. **Both failed** → `.failed`, surface a human-readable state and offer "copy to clipboard" so the user isn't stranded ([§9](#9-error-taxonomy--handling)).
+5. **Paste failed** (CGEvent post itself failed, e.g. the events couldn't be constructed) → `.failed`, surface a human-readable state and offer "copy to clipboard" so the user isn't stranded ([§9](#9-error-taxonomy--handling)).
 
 **Notes:** the pasteboard save/restore is best-effort but MUST always attempt restoration even on paste failure (no silent clipboard clobbering). Requires **Accessibility (AX)** permission ([§8](#8-permissions--entitlements-detail)); if not granted, insertion is disabled with a fix-it hint rather than failing mysteriously.
 
@@ -1026,7 +1021,7 @@ stateDiagram-v2
     PromptBack --> Idle
     Executing --> Idle: skill result shown in overlay
     Cleanup --> Inserting: tone-cleanup pass (§4.6)
-    Inserting --> Idle: text inserted (AX / paste)
+    Inserting --> Idle: text inserted (paste)
     note right of Listening
         Listening State feedback is MANDATORY
         (menubar + overlay + optional audio cue)
@@ -1232,7 +1227,7 @@ macOS permission UX is load-bearing (PRD §10). Each permission is detected inde
 |---|---|---|---|---|
 | **Microphone** | `AVCaptureDevice.authorizationStatus(for: .audio)` | All STT (**Command Mode**, **Dictation Mode**, Wake Word) | status enum | `requestAccess`; deep-link `x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone` |
 | **Input Monitoring** | TCC `kTCCServiceListenEvent`; `IOHIDCheckAccess(kIOHIDRequestTypeListenEvent)` | **Hotkey** — listen-only `CGEventTap` (`kCGEventTapOptionListenOnly`) requires Input Monitoring on macOS ≥ 10.15, **not** Accessibility | `IOHIDCheckAccess(...) == kIOHIDAccessTypeGranted` (bool) | `IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)` (macOS shows "Quit & Reopen" — the grant is observed only **after relaunch**); deep-link `…?Privacy_ListenEvent` |
-| **Accessibility (AX)** | `AXIsProcessTrustedWithOptions` | **Text Insertion** (AX path) | `AXIsProcessTrusted()` | `…?Privacy_Accessibility` (cannot programmatically prompt; must guide) |
+| **Accessibility (AX)** | `AXIsProcessTrustedWithOptions` | **Text Insertion** (posting the synthetic ⌘V that Text Insertion is now built on requires it, same as the AX write it replaced) | `AXIsProcessTrusted()` | `…?Privacy_Accessibility` (cannot programmatically prompt; must guide) |
 | **Screen Recording** | `CGPreflightScreenCaptureAccess()` / `CGRequestScreenCaptureAccess()` | **Screen Q&A** (`screencapture`) | preflight bool | `…?Privacy_ScreenCapture` |
 | **Calendar / EventKit** | `EKEventStore.authorizationStatus(for: .event)` | Calendar-read skill (optional/skippable) | status enum | `requestFullAccessToEvents`; `…?Privacy_Calendars` |
 
@@ -1244,7 +1239,7 @@ macOS permission UX is load-bearing (PRD §10). Each permission is detected inde
 |---|---|---|
 | Hardened Runtime | enabled | Notarization prerequisite |
 | `com.apple.security.device.audio-input` | true | Microphone capture |
-| `com.apple.security.automation.apple-events` | true | AX-driven insertion / app control where needed |
+| `com.apple.security.automation.apple-events` | true | App control via Apple Events where a Skill needs it (not text insertion, which is CGEvent-based paste — no AX write) |
 | `com.apple.security.cs.disable-library-validation` | true | Load whisper.cpp + llama.cpp native libs / bundled sidecar |
 | `com.apple.security.cs.allow-jit` | as required by llama.cpp/Metal | LLM inference on Metal |
 | App Sandbox | **off** (v1) | Needs `screencapture`, arbitrary text insertion, launchd user agents, local sidecar process — sandbox would break these. **[ASSUMPTION]**: revisit only if App Store ever becomes a target (explicitly out of scope). |
@@ -1274,7 +1269,8 @@ Every failure surfaces a **human-readable state** — never silent (NFR). One `A
 | **Automation** | N consecutive failures | `.automation(.autoDisabled)` | Notification + auto-disable; re-enable in settings (§5.3) |
 | Automation | Timeout / nonzero exit | `.automation(.runFailed)` | Logged to `logs/exec/…`; failure counter++ |
 | Automation | sha256 mismatch (hand-edit) | `.automation(.integrityChanged)` | Re-scan + re-approve gate (§5.3) |
-| **Text Insertion** | AX + paste both fail | `.insertion(.allPathsFailed)` | "Couldn't insert — copied to clipboard instead" |
+| **Text Insertion** | Paste fails (post itself failed) | `.insertion(.pasteFailed)` | "Couldn't insert — copied to clipboard instead" |
+| Insertion | Secure Input active | `.insertion(.secureInputActive)` | "Couldn't paste — Secure Input is active"; text left on clipboard |
 | Insertion | AX denied | `.permission(.accessibility)` | Fix-it hint + deep-link |
 | **Screen Q&A** | OCR yields nothing useful | `.screen(.noText)` | Honest "I couldn't read anything on screen" (no hallucination) |
 | Screen Q&A | Screen Recording denied | `.permission(.screenRecording)` | Fix-it hint + deep-link |
@@ -1297,7 +1293,7 @@ Structural placement in [`03-architecture.md`](./03-architecture.md); this secti
 | `SkillRegistry`, `Dispatcher` | `actor` | Serialize manifest state + failure_state mutation |
 | `STTEngine`, `AudioCaptureBuffer` | `actor` | whisper.cpp is not thread-safe across concurrent transcribe calls; buffer needs serialized append/finalize |
 | `SidecarController` | `actor` | Serialize lifecycle transitions (§5.1) |
-| `TextInserter` | `@MainActor` | **AX + CGEvent synthesis MUST run on the main thread** |
+| `TextInserter` | `@MainActor` | **`AXIsProcessTrusted()` check + CGEvent synthesis MUST run on the main thread** |
 | Hotkey CGEventTap callback | Runs on a dedicated run-loop thread; hops to actors via `Task` | Event tap must not block; heavy work offloaded |
 | `DangerousCommandScanner` | value type, pure, callable anywhere | No I/O, no shared state, no execution |
 | LLM inference / model load | off-main (Sidecar is a separate process; whisper on a background executor) | Never block UI |
@@ -1305,7 +1301,7 @@ Structural placement in [`03-architecture.md`](./03-architecture.md); this secti
 
 **Main-thread rules (MUST):**
 
-- All `AXUIElement` reads/writes and all `CGEvent.post` calls on the main thread ([§4.7](#47-text-insertion-decision-ax-first--paste-fallback--clipboard-saverestore--terminal-app-detection)).
+- The `AXIsProcessTrusted()` permission check and all `CGEvent.post` calls on the main thread ([§4.7](#47-text-insertion-decision-paste-only--secure-input-precheck--clipboard-saverestore--terminal-app-detection)).
 - All overlay/menubar UI updates on `@MainActor`.
 - The CGEventTap keyDown/keyUp callback returns *immediately*; it only signals start/stop of capture and dispatches to the audio actor — no transcription or routing inside the tap.
 

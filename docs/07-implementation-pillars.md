@@ -63,14 +63,47 @@ Speak a command; a built-in skill runs.
 | **Done =** | "open Safari" → routes → executes; prompt-back and Confirm-Back paths both work. |
 
 ### P5 · Dictation
-The hero feature: talk into any app, cleaned up.
+The hero feature: talk into any app, cleaned up. Split into **P5a · Dictation Core** and **P5b · Personalization Dictionary** (same split as P2a/P2b). Specs: [`specs/P5a-dictation-core.md`](../specs/P5a-dictation-core.md), [`specs/P5b-personalization-dictionary.md`](../specs/P5b-personalization-dictionary.md). Plans: [`plans/P5a-dictation-core.md`](../plans/P5a-dictation-core.md), [`plans/P5b-personalization-dictionary.md`](../plans/P5b-personalization-dictionary.md).
+
+### P5a · Dictation Core
+Hold ⌃Space → transcribe → optional tone cleanup → insert at the caret.
 
 | | |
 |---|---|
-| **Contains** | Hotkey B capture → transcribe → single **tone-aware cleanup pass** (**Tone Presets**) → **Text Insertion** (AX-first, clipboard-paste fallback, clipboard restore, terminal detection) → **Personalization Dictionary** ("correct that", Whisper bias prompt, cleanup pairs). |
-| **HLD / LLD** | HLD §9, §15.2; LLD §2.3, §4.5–4.7 |
-| **Depends on** | **P1, P2** (+ **P3** for terminal-destination dictation) |
-| **Done =** | Dictate into a standard app and into a terminal — cleaned, inserted, with the destination-aware scan on terminal input. |
+| **Contains** | Hotkey B capture → transcribe → single **tone-aware cleanup pass** (**Tone Presets**) → **Text Insertion** (paste-only: synthetic ⌘V with clipboard save/restore and clipboard-manager skip markers, Secure-Input preflight, copy-to-clipboard escape, terminal-destination scan via P3 C11) → Settings (`tone`, `dictation.cleanup_enabled`) → raw bypass when the sidecar is not ready. |
+| **HLD / LLD** | HLD §9, §18.2; LLD §2.5, §3.5, §4.6–4.7, §6.3, §8–10 |
+| **Depends on** | **P1, P2, P3** (P4 merged to `main` but not a logic dependency) |
+| **Done =** | Dictate into a standard app and into a terminal — cleaned (or raw on bypass), inserted, with Confirm-Back on terminal input. |
+
+> **AX insertion was removed during implementation** — see ADR **A8** in [`03-architecture.md`](./03-architecture.md). `AXUIElementSetAttributeValue(…, kAXSelectedTextAttribute, …)` reports success on *acceptance*, not insertion, so Electron/Catalyst/custom text views accepted and discarded it; it had zero confirmed successes in real use. With AX gone, `InsertionPlanner`, `AppInsertionOverride`, `InsertionPlan`, `TerminalBundleAllowlist` and per-app override learning went with it. Accessibility permission is still required — synthetic ⌘V needs it. The P5a spec and plan carry an amendment banner recording the same reversal.
+
+### P5b · Personalization Dictionary
+Explicit-only vocabulary store consumed by Whisper and cleanup.
+
+| | |
+|---|---|
+| **Contains** | `dictionary.json` (LLD §2.3) + MRU cap 500; **"correct that"** builtin skill; Whisper **bias prompt** (real tokenizer, 200-token budget, merged with P4 app-name bias); cleanup-prompt **substitution** list (top 40); Dictionary Settings pane. |
+| **HLD / LLD** | HLD §9.3, §15.2; LLD §2.3, §4.5, §6.3 |
+| **Depends on** | **P4** (registry/GBNF/executor), **P5a** (prompt slots) |
+| **Done =** | "correct that: X should be Y" → next dictation is biased and substitutions apply; wipe-history spares the dictionary. |
+
+### P5d · Streaming Dictation Output
+Insert cleaned text progressively instead of all at once on release.
+
+> **Not specced — needs design work before a PRD.** Registered here so the idea has a home,
+> not because the approach is settled.
+
+| | |
+|---|---|
+| **Contains** | Streamed LLM cleanup (`stream: true`, already supported by `InferenceClient`) with progressive insertion at the caret, replacing P5a's atomic batch-on-release insert. |
+| **Depends on** | **P5a** (the cleanup + insertion path it replaces) |
+| **Targets** | *Perceived* latency only — total wall-clock is unchanged or slightly worse. Measured baseline: `audio 25.2s · stt 1.76s · cleanup 8.97s · insert 0.43s`. Today the user sees nothing until the whole pipeline finishes. |
+| **Open questions (grill before speccing)** | Insertion is **paste-only** (ADR A8) — streaming means repeated ⌘V, each clobbering and restoring the clipboard, into an app that may reorder or coalesce. Can partial output be un-inserted if cleanup later revises earlier text? The terminal scan (P3 C11) runs on the exact string about to be inserted — streaming breaks that invariant, since no chunk is the final string. Confirm-Back cannot gate text already inserted. Does progressive insert interact safely with `pendingInsert` supersession (see `bugs.md` B1)? |
+| **Done =** | *TBD — do not write acceptance criteria until the safety questions above are answered.* |
+
+> P5a explicitly lists **"Streaming / partial insert — batch-on-release, atomic insert"** under
+> Out of Scope. P5d is where that decision gets revisited, and the terminal-scan invariant is
+> the reason it was deferred rather than an oversight.
 
 ### P6 · Assistant Intelligence
 Ask about the world and about the screen.
@@ -80,6 +113,7 @@ Ask about the world and about the screen.
 | **Contains** | **General-Knowledge Q&A** (local answering, **⟨UNSURE⟩** honesty flow); **Screen Q&A** (`screencapture` → Vision **OCR** with **Bounding Boxes** → prompt); **Session Context** + automatic continuation detection; **Cloud Escalation/BYOK** offload + **Local/Cloud Indicator**. |
 | **HLD / LLD** | HLD §10–12; LLD §2.4, §6 |
 | **Depends on** | **P1, P2, P4** (reserved targets `general_qa` / `screen_qa`) |
+| **Feeds** | **Session Context** also feeds the P5a dictation cleanup prompt (LLD §6.3, currently preset instruction + dictionary substitutions + raw transcript only) — dictation itself holds no cross-utterance buffer, so consecutive dictated utterances don't cohere on their own; that's deliberate, since cross-utterance coherence is solved once here rather than with a dictation-local buffer. |
 | **Done =** | Confident local answer; uncertain → consent-gated offload; a follow-up that uses context; a screen question answered from OCR. |
 
 ### P7 · Automations & Scheduling
@@ -121,4 +155,7 @@ Each pillar gets, in order:
 | P2 Inference Core | **Complete** — P2a · Speech-to-Text (all 5 phases) + P2b · LLM Runtime (all 6 phases) shipped |
 | P3 Safety Guard | **Complete** — all 6 phases shipped (`plans/P3-safety-guard.md`); recursive-descent scanner with 370 tests |
 | P4 Command Routing & Skills | **Complete** — headless Phases 1–7 (`plans/P4-command-routing-and-skills.md`) plus app-wiring Phases 1–6 (`plans/P4-app-wiring.md`) |
-| P5, P6, P7 | Not started |
+| P5a Dictation Core | **Complete** — all 5 phases shipped on `feat/p5a-dictation-core` (`plans/P5a-dictation-core.md`); insertion is paste-only per ADR A8 |
+| P5b Personalization Dictionary | **Spec + plan authored** — implementation not started (`plans/P5b-personalization-dictionary.md`); execute after P5a |
+| P5d Streaming Dictation Output | **Idea only** — no spec, no plan. Needs design work on the terminal-scan and paste-only conflicts before a PRD is worth writing |
+| P6, P7 | Not started |

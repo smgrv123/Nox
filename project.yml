@@ -106,6 +106,9 @@ targets:
         product: BuiltinSkills
       - package: AideModules
         product: CommandMode
+      # P5a: dictation driver + insertion planner (AX/paste shell is App/TextInserterLive).
+      - package: AideModules
+        product: Dictation
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.aide.Aide

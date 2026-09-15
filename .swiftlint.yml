@@ -14,6 +14,9 @@ excluded:
 
 # swift-format owns line length + comma style; keep SwiftLint from fighting it.
 disabled_rules:
+  - opening_brace   # swift-format owns brace placement (.swift-format); it wraps
+                    # long declarations with the opening brace on its own line,
+                    # which this rule flags — pure brace-placement, not correctness
   - todo            # we intentionally keep TODO markers that reference the LLD
   - trailing_comma  # swift-format enforces multi-element trailing commas
 

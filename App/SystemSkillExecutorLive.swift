@@ -114,7 +114,8 @@ struct SystemSkillExecutorLive: SystemSkillExecutor {
         }
 
         if let aliasTarget = aliasTable[normalize(appName)],
-            let match = installed.first(where: { namesMatch(aliasTarget, $0.displayName) }) {
+            let match = installed.first(where: { namesMatch(aliasTarget, $0.displayName) })
+        {
             return ResolvedApp(name: match.displayName, bundleURL: match.bundleURL)
         }
 

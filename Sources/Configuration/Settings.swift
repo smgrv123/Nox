@@ -10,7 +10,8 @@ import Foundation
 /// (the two push-to-talk bindings), bumping the schema to v2. Later phases add their
 /// own blocks and bump `currentSchemaVersion`; the forward-migration chain
 /// (`SettingsMigration`) is exactly how those additions slot in without breaking
-/// existing files.
+/// existing files. **v6** (P5a Phase 4) models `tone`, `dictation` (cleanup toggle),
+/// and `text_insertion` (per-app AX/paste overrides).
 ///
 /// **Secrets are never modelled here** (docs/03-architecture.md §10.1, D1). A future
 /// BYOK key lives in the macOS Keychain, referenced from the file by a `keychain://`
@@ -30,8 +31,9 @@ public struct Settings: Equatable, Sendable, Codable {
     /// **v4** (P2a Phase 5) added `stt_model_tier` — the onboarding-confirmed Whisper
     /// Tier, so `SttTierPolicy`'s override survives relaunch instead of only ever
     /// reading detected RAM. **v5** renamed `stt_model_tier` → `model_tier` — the
-    /// single Tier governs both STT and LLM model selection.
-    public static let currentSchemaVersion = 5
+    /// single Tier governs both STT and LLM model selection. **v6** (P5a Phase 4)
+    /// adds `tone`, `dictation.cleanup_enabled`, and `text_insertion.app_overrides`.
+    public static let currentSchemaVersion = 6
 
     /// The document's schema version. Always normalised to `currentSchemaVersion`
     /// in memory (migration runs on load), so an in-memory value never lags the file.
@@ -65,12 +67,24 @@ public struct Settings: Equatable, Sendable, Codable {
     /// Tier governs both STT (Whisper) and LLM (Qwen) model selection.
     public var modelTier: String?
 
+    /// Default dictation tone preset (LLD §2.5 `tone`; P5a Phase 4). Stored as
+    /// `Settings.TonePreset` (`as_is` / `professional` / `casual` / `concise`) so
+    /// `Configuration` never imports `Dictation`. Unknown JSON falls back to `.asIs`.
+    public var tone: Tone
+
+    /// Dictation cleanup toggle (P5a locked bypass; JSON key `dictation`). Named
+    /// `DictationSettings` so import sites that also import the `Dictation` module
+    /// do not collide on the type name.
+    public var dictation: DictationSettings
+
     public init(
         hotkeys: Hotkeys = Hotkeys(),
         indicators: Indicators = Indicators(),
         privacy: Privacy = Privacy(),
         onboarding: OnboardingProgress = OnboardingProgress(),
-        modelTier: String? = nil
+        modelTier: String? = nil,
+        tone: Tone = Tone(),
+        dictation: DictationSettings = DictationSettings()
     ) {
         self.schemaVersion = Settings.currentSchemaVersion
         self.hotkeys = hotkeys
@@ -78,6 +92,8 @@ public struct Settings: Equatable, Sendable, Codable {
         self.privacy = privacy
         self.onboarding = onboarding
         self.modelTier = modelTier
+        self.tone = tone
+        self.dictation = dictation
     }
 
     /// The safe defaults used for a missing or unreadable file (User Story 38: a
@@ -91,6 +107,18 @@ public struct Settings: Equatable, Sendable, Codable {
         case privacy
         case onboarding
         case modelTier = "model_tier"
+        case tone
+        case dictation
+        // Note: no `textInsertion` case — the per-app AX/paste override machinery
+        // was removed (AX insertion no longer exists; dictation always pastes). This
+        // was a deliberate choice not to bump the schema version for the removal. A
+        // `text_insertion` key left over in an existing v6 `settings.json` is simply
+        // unrecognized JSON at decode time — Foundation's `JSONDecoder` silently
+        // ignores keys with no matching `CodingKeys` case, so old files with that
+        // block still decode without error. But `encode(to:)` is synthesised from
+        // these `CodingKeys`, so the next `persistSettings()` rewrites the file
+        // without the block — it's dropped, not preserved. That's harmless: nothing
+        // reads it either way.
     }
 
     public init(from decoder: Decoder) throws {
@@ -104,6 +132,9 @@ public struct Settings: Equatable, Sendable, Codable {
         self.onboarding =
             try container.decodeIfPresent(OnboardingProgress.self, forKey: .onboarding) ?? OnboardingProgress()
         self.modelTier = try container.decodeIfPresent(String.self, forKey: .modelTier)
+        self.tone = try container.decodeIfPresent(Tone.self, forKey: .tone) ?? Tone()
+        self.dictation =
+            try container.decodeIfPresent(DictationSettings.self, forKey: .dictation) ?? DictationSettings()
     }
     // `encode(to:)` is synthesised from `CodingKeys` — writes every block above.
 }
