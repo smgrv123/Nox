@@ -54,9 +54,9 @@ Register module.
 
 ### Acceptance criteria
 
-- [ ] Module registered; named tests pass.
-- [ ] File written at the injected URL is valid JSON with `schema_version: 1`.
-- [ ] Per-phase gate green (`just app` still required after `project.yml`).
+- [x] Module registered; named tests pass.
+- [x] File written at the injected URL is valid JSON with `schema_version: 1`.
+- [x] Per-phase gate green (`just app` still required after `project.yml`).
 
 ---
 

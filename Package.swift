@@ -65,6 +65,10 @@ let package = Package(
         // P5a · Dictation Core: insertion planner + DictationDriver (capture →
         // transcribe → tone cleanup → insert). AppKit/AX lives in App/TextInserterLive.swift.
         .library(name: "Dictation", targets: ["Dictation"]),
+        // P5b · Personalization Dictionary: explicit vocabulary store, promotion,
+        // MRU, and (later phases) bias/substitution builders. Persistence only —
+        // no AppKit, whisper, InferenceClient, CommandMode, or Dictation.
+        .library(name: "Personalization", targets: ["Personalization"]),
     ],
     targets: [
         .target(name: "AideCore"),
@@ -259,6 +263,13 @@ let package = Package(
                 "AideCore", "SpeechToText", "DangerousCommandScanner", "LLMRuntime",
             ]
         ),
+        // P5b · Personalization Dictionary (docs/05-lld.md §2.3, §4.5). Pure
+        // store + policy; AtomicFileWriter is the only I/O. Prompt consumers
+        // pull values *from* the store via App/DictationDriver closures.
+        .target(
+            name: "Personalization",
+            dependencies: ["Persistence"]
+        ),
         // P2b Phase 4 · the pure LLM-runtime heart, playing the role `SpeechToText`
         // played for P2a: `LlmTierPolicy` (Tier → Qwen `ModelDescriptor`) today; the
         // `LLMClient`/`SidecarController` seams, backoff schedule, and idle-unload state
@@ -427,6 +438,10 @@ let package = Package(
                 "DangerousCommandScanner",
                 "LLMRuntime",
             ]
+        ),
+        .testTarget(
+            name: "PersonalizationTests",
+            dependencies: ["Personalization"]
         ),
     ]
 )

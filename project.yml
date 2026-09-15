@@ -109,6 +109,9 @@ targets:
       # P5a: dictation driver + insertion planner (AX/paste shell is App/TextInserterLive).
       - package: AideModules
         product: Dictation
+      # P5b: personalization dictionary store (explicit vocabulary).
+      - package: AideModules
+        product: Personalization
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.aide.Aide
