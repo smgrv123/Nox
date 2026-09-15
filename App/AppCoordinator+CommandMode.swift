@@ -26,9 +26,16 @@ extension AppCoordinator {
             modelURL: AppCoordinator.modelsDirectory.blobURL(for: resolvedSttModelDescriptor))
         let capture = AudioCapture()
         let preGate = SegmentPreGate(thresholds: .provisional)
+        let dictionary = makeDictionaryStore()
+        let installedApps: any InstalledApplicationCatalog = InstalledApplicationCatalogLive()
+        let makePrompt = makeBiasInitialPrompt(
+            engine: engine, dictionary: dictionary, installedApps: installedApps)
 
-        let dictation = await makeDictationDriver(engine: engine, capture: capture, preGate: preGate)
-        let command = await makeCommandModeDriver(engine: engine, capture: capture, preGate: preGate)
+        let dictation = await makeDictationDriver(
+            engine: engine, capture: capture, preGate: preGate, makeInitialPrompt: makePrompt)
+        let command = await makeCommandModeDriver(
+            engine: engine, capture: capture, preGate: preGate,
+            dictionary: dictionary, makeInitialPrompt: makePrompt)
         let mux = MuxVoiceSessionDriver(command: command, dictation: dictation)
 
         voiceSession = VoiceSessionCoordinator(
@@ -55,7 +62,8 @@ extension AppCoordinator {
     private func makeDictationDriver(
         engine: any STTEngine,
         capture: any AudioCaptureBuffer,
-        preGate: SegmentPreGate
+        preGate: SegmentPreGate,
+        makeInitialPrompt: @escaping @Sendable () async -> String?
     ) async -> DictationDriver {
         let inserter = await MainActor.run { TextInserterLive() }
         return DictationDriver(
@@ -101,6 +109,7 @@ extension AppCoordinator {
             noteSidecarActivity: { [weak self] in
                 await self?.noteLLMActivity()
             },
+            makeInitialPrompt: makeInitialPrompt,
             appendHistory: { [weak self] entry in
                 self?.recordDictationCompletion(entry.cleaned ?? entry.transcript)
                 guard let storage = self?.storage else { return }
@@ -111,7 +120,9 @@ extension AppCoordinator {
     private func makeCommandModeDriver(
         engine: any STTEngine,
         capture: any AudioCaptureBuffer,
-        preGate: SegmentPreGate
+        preGate: SegmentPreGate,
+        dictionary: DictionaryStore?,
+        makeInitialPrompt: @escaping @Sendable () async -> String?
     ) async -> CommandModeDriver {
         let registryDirectory: URL
         if let storage {
@@ -133,12 +144,6 @@ extension AppCoordinator {
             grammar: grammar
         )
         let installedApps = InstalledApplicationCatalogLive()
-        let dictionary: DictionaryStore?
-        if let storage {
-            dictionary = DictionaryStore(fileURL: storage.dictionaryFile)
-        } else {
-            dictionary = nil
-        }
         let dispatcher = CommandDispatcher(
             registry: registry,
             scanner: DangerousCommandScanner(),
@@ -158,11 +163,52 @@ extension AppCoordinator {
             dispatcher: dispatcher,
             registry: registry,
             logger: CalibrationLogger(fileURL: logURL),
-            appCatalog: installedApps,
+            makeInitialPrompt: makeInitialPrompt,
             resolveEndpoint: { [weak self] in
                 try await Self.resolveLiveSidecarEndpoint(from: self)
             }
         )
+    }
+
+    private func makeDictionaryStore() -> DictionaryStore? {
+        guard let storage else { return nil }
+        return DictionaryStore(fileURL: storage.dictionaryFile)
+    }
+
+    /// Shared Whisper `initialPrompt` for Command Mode and Dictation: ranked dictionary
+    /// terms first, leftover budget for installed-app names. Tokenizer load failure
+    /// falls back to the app-name prompt only — never a char-count fake.
+    private func makeBiasInitialPrompt(
+        engine: WhisperSTTEngine,
+        dictionary: DictionaryStore?,
+        installedApps: any InstalledApplicationCatalog
+    ) -> @Sendable () async -> String? {
+        { [weak self] in
+            let extraPhrases = await Self.appNameBiasPhrases(installedApps)
+            let appNamesOnly = extraPhrases.isEmpty ? nil : extraPhrases.joined(separator: ", ")
+            guard let dictionary else { return appNamesOnly }
+            let entries = await dictionary.promotedEntries()
+            do {
+                return try await engine.withTokenCounter { counter in
+                    BiasPromptBuilder().build(
+                        promotedEntries: entries,
+                        extraPhrases: extraPhrases,
+                        counter: counter)
+                }
+            } catch {
+                self?.appLog?.log(
+                    "Bias prompt: tokenizer unavailable (\(error)); using app-name prompt.",
+                    level: .notice)
+                return appNamesOnly
+            }
+        }
+    }
+
+    private static func appNameBiasPhrases(
+        _ catalog: any InstalledApplicationCatalog
+    ) async -> [String] {
+        guard let joined = await CommandModeDriver.appNameBiasPrompt(catalog) else { return [] }
+        return joined.components(separatedBy: ", ")
     }
 
     /// llama-server binds a fresh `:0` port each launch (and after idle-unload), so the

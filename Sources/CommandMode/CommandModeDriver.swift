@@ -27,7 +27,7 @@ public final class CommandModeDriver: VoiceSessionDriver {
     let dispatcher: any Dispatching
     let registry: any SkillRegistering
     let logger: CalibrationLogger
-    let appCatalog: any InstalledApplicationCatalog
+    let makeInitialPrompt: @Sendable () async -> String?
     let resolveEndpoint: @Sendable () async throws -> LLMEndpoint
 
     var generation = 0
@@ -59,7 +59,7 @@ public final class CommandModeDriver: VoiceSessionDriver {
         dispatcher: any Dispatching,
         registry: any SkillRegistering,
         logger: CalibrationLogger,
-        appCatalog: any InstalledApplicationCatalog = EmptyInstalledApplicationCatalog(),
+        makeInitialPrompt: @escaping @Sendable () async -> String?,
         resolveEndpoint: @escaping @Sendable () async throws -> LLMEndpoint
     ) {
         self.engine = engine
@@ -69,7 +69,7 @@ public final class CommandModeDriver: VoiceSessionDriver {
         self.dispatcher = dispatcher
         self.registry = registry
         self.logger = logger
-        self.appCatalog = appCatalog
+        self.makeInitialPrompt = makeInitialPrompt
         self.resolveEndpoint = resolveEndpoint
     }
 
@@ -82,7 +82,7 @@ public final class CommandModeDriver: VoiceSessionDriver {
         dispatcher: any Dispatching,
         registry: any SkillRegistering,
         logger: CalibrationLogger,
-        appCatalog: any InstalledApplicationCatalog = EmptyInstalledApplicationCatalog(),
+        makeInitialPrompt: @escaping @Sendable () async -> String?,
         endpoint: LLMEndpoint
     ) {
         self.init(
@@ -93,7 +93,7 @@ public final class CommandModeDriver: VoiceSessionDriver {
             dispatcher: dispatcher,
             registry: registry,
             logger: logger,
-            appCatalog: appCatalog,
+            makeInitialPrompt: makeInitialPrompt,
             resolveEndpoint: { endpoint }
         )
     }

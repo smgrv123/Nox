@@ -178,7 +178,7 @@ let package = Package(
         // integration check (`WhisperSTTEngineTests`), which skips without a placed model.
         .target(
             name: "WhisperSTTEngine",
-            dependencies: ["SpeechToText", "whisper"]
+            dependencies: ["SpeechToText", "Personalization", "whisper"]
         ),
         // P2a · the real `VoiceSessionDriver` conformer (specs/P2a §"Effectful shells"):
         // orchestrates capture → decode → Pre-Gate on `begin`/`end`. Depends only on the

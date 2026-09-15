@@ -74,6 +74,21 @@ public actor WhisperSTTEngine: STTEngine {
         context = loaded
     }
 
+    /// Load the model if needed and run `body` with a ``WhisperTokenCounter`` over
+    /// the warm context (`whisper_token_count`).
+    ///
+    /// `body` is synchronous and runs on this actor, serialized with ``transcribe``.
+    /// Do not store or return the counter — whisper's context is not thread-safe.
+    public func withTokenCounter<Result>(
+        _ body: (WhisperTokenCounter) throws -> Result
+    ) throws -> Result {
+        try ensureLoaded()
+        guard let context else {
+            throw WhisperSTTEngineError.modelLoadFailed(modelURL)
+        }
+        return try body(WhisperTokenCounter(context: context))
+    }
+
     public func transcribe(
         _ pcm: PCMBuffer,
         language: LanguageHint,

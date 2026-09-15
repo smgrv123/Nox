@@ -182,29 +182,6 @@ struct FakeInstalledApplicationCatalog: InstalledApplicationCatalog {
     }
 }
 
-/// Records the `initialPrompt` passed to `transcribe`, in addition to returning a
-/// canned `Transcription`. Local to this test target — does not touch the shared
-/// `MockSTTEngine` used across other test targets.
-actor RecordingSTTEngine: STTEngine {
-    private let stub: Transcription
-    private(set) var lastInitialPrompt: String?
-
-    init(returning transcription: Transcription) {
-        self.stub = transcription
-    }
-
-    func ensureLoaded() async throws {}
-
-    func transcribe(
-        _ pcm: PCMBuffer,
-        language: LanguageHint,
-        initialPrompt: String?
-    ) async throws -> Transcription {
-        lastInitialPrompt = initialPrompt
-        return stub
-    }
-}
-
 // MARK: - Pipeline factory (CommandModeDriverTests)
 
 let commandModePCM = PCMBuffer(
@@ -249,7 +226,8 @@ func makeDriver(
     engine: (any STTEngine)? = nil,
     capture: FakeCaptureBuffer? = nil,
     router: (any Routing)? = nil,
-    appCatalog: (any InstalledApplicationCatalog)? = nil
+    appCatalog: (any InstalledApplicationCatalog)? = nil,
+    makeInitialPrompt: (@Sendable () async -> String?)? = nil
 ) async throws -> CommandModeDriver {
     let valueRange = try utf8Range(of: route.skillLiteral, in: route.raw)
     let completion = RouterCompletion(
@@ -275,6 +253,8 @@ func makeDriver(
         thresholds: .provisional
     )
     let logURL = try logFileURL ?? temporaryLogURL()
+    let catalog = appCatalog ?? EmptyInstalledApplicationCatalog()
+    let prompt = makeInitialPrompt ?? { await CommandModeDriver.appNameBiasPrompt(catalog) }
     return CommandModeDriver(
         engine: engine ?? MockSTTEngine(returning: passingTranscription(text: "open Safari")),
         capture: capture ?? FakeCaptureBuffer(finalizeReturns: commandModePCM),
@@ -283,7 +263,7 @@ func makeDriver(
         dispatcher: dispatcher,
         registry: registry,
         logger: CalibrationLogger(fileURL: logURL),
-        appCatalog: appCatalog ?? EmptyInstalledApplicationCatalog(),
+        makeInitialPrompt: prompt,
         endpoint: commandModeLocalEndpoint
     )
 }

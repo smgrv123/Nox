@@ -11,7 +11,7 @@ extension CommandModeDriver {
         let startedAt = Date()
         do {
             try await engine.ensureLoaded()
-            let initialPrompt = await Self.appNameBiasPrompt(appCatalog)
+            let initialPrompt = await makeInitialPrompt()
             let transcription = try await engine.transcribe(
                 Self.peakNormalize(pcm), language: .auto, initialPrompt: initialPrompt)
             guard self.generation == generation else { return }
@@ -116,15 +116,10 @@ extension CommandModeDriver {
         }
     }
 
-    /// Narrow, Command-Mode-only reuse of `STTEngine.transcribe`'s `initialPrompt` slot
-    /// (reserved for P5's Personalization Dictionary — see `STTEngine.swift`'s doc
-    /// comment). This is *not* that feature: no 224-token budgeting, no term-pair or
-    /// MRU-eviction logic, just a small deterministic list of installed app display
-    /// names so whisper is biased toward names like "Ghostty" instead of mishearing
-    /// them as common words. System Utilities are excluded (rarely spoken by name) and
-    /// the list is capped at 50 entries, sorted alphabetically, so the bias prompt is
-    /// stable across runs regardless of catalog enumeration order.
-    static func appNameBiasPrompt(_ appCatalog: any InstalledApplicationCatalog) async -> String? {
+    /// Installed-app display names for Whisper's `initialPrompt` slot, capped at 50,
+    /// alphabetical, system utilities excluded. The P5b composition root merges this
+    /// with dictionary terms; Command Mode no longer calls it from `resolve` directly.
+    public static func appNameBiasPrompt(_ appCatalog: any InstalledApplicationCatalog) async -> String? {
         let names =
             await appCatalog.installedApplications()
             .filter { !$0.isSystemUtility }

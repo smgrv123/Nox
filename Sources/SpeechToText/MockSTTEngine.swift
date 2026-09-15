@@ -9,6 +9,8 @@ public actor MockSTTEngine: STTEngine {
 
     private let stub: Transcription
 
+    public private(set) var lastInitialPrompt: String?
+
     /// How many times `ensureLoaded()` has been called — lets tests assert the warm-load
     /// lifecycle without a real model.
     public private(set) var ensureLoadedCallCount = 0
@@ -27,6 +29,7 @@ public actor MockSTTEngine: STTEngine {
         language: LanguageHint,
         initialPrompt: String?
     ) async throws -> Transcription {
-        stub
+        lastInitialPrompt = initialPrompt
+        return stub
     }
 }

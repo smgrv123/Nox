@@ -142,10 +142,10 @@ GBNF is generated from manifests — no hand-edited `.gbnf` file. Confirm `FileS
 
 ### Acceptance criteria
 
-- [ ] Named tests pass.
-- [ ] Both drivers receive the merged prompt (assert in driver tests).
-- [ ] Real tokenizer compiles in `WhisperSTTEngine`; `just app` links.
-- [ ] Per-phase gate green.
+- [x] Named tests pass.
+- [x] Both drivers receive the merged prompt (assert in driver tests).
+- [x] Real tokenizer compiles in `WhisperSTTEngine`; `just app` links.
+- [x] Per-phase gate green.
 
 ---
 

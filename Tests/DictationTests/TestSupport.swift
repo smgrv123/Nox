@@ -179,6 +179,7 @@ func makeDictationDriver(
     sidecarReadiness: @escaping @Sendable () async -> SidecarReadiness = { .ready },
     awaitSidecarReady: @escaping @Sendable (TimeInterval) async -> Bool = { _ in true },
     noteSidecarActivity: @escaping @Sendable () async -> Void = {},
+    makeInitialPrompt: @escaping @Sendable () async -> String? = { nil },
     appendHistory: @escaping @Sendable (DictationHistoryEntry) -> Void = { _ in }
 ) -> DictationDriver {
     DictationDriver(
@@ -194,6 +195,7 @@ func makeDictationDriver(
         sidecarReadiness: sidecarReadiness,
         awaitSidecarReady: awaitSidecarReady,
         noteSidecarActivity: noteSidecarActivity,
+        makeInitialPrompt: makeInitialPrompt,
         appendHistory: appendHistory)
 }
 

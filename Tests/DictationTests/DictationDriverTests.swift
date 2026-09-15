@@ -38,6 +38,29 @@ final class DictationDriverTests: XCTestCase {
             ])
     }
 
+    func testInjectedInitialPromptIsPassedToSTT() async {
+        let capture = FakeCaptureBuffer(finalizeReturns: dictationTestPCM)
+        let inserter = RecordingInserter()
+        let engine = MockSTTEngine(returning: passingTranscription())
+        let driver = makeDictationDriver(
+            engine: engine,
+            capture: capture,
+            inserter: inserter,
+            makeInitialPrompt: { "Kubernetes, Ghostty" })
+
+        let resolved = expectation(description: "result delivered")
+        driver.onUpdate = { update in
+            if case .result = update { resolved.fulfill() }
+        }
+
+        driver.begin(mode: .dictation)
+        driver.end()
+        await fulfillment(of: [resolved], timeout: 2)
+
+        let prompt = await engine.lastInitialPrompt
+        XCTAssertEqual(prompt, "Kubernetes, Ghostty")
+    }
+
     func testInsertFailedStillDeliversTranscriptWithCopyEscapeSummary() async {
         let capture = FakeCaptureBuffer(finalizeReturns: dictationTestPCM)
         let inserter = RecordingInserter()
