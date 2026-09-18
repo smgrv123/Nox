@@ -27,6 +27,14 @@ extension AppCoordinator {
         }
     }
 
+    func updateDictionaryEntry(_ entry: DictionaryEntry) {
+        Task { [weak self] in
+            guard let self, let store = self.dictionaryStore else { return }
+            try? await store.upsert(entry)
+            await self.publishDictionaryEntries()
+        }
+    }
+
     func resetDictionary() {
         Task { [weak self] in
             guard let self, let store = self.dictionaryStore else { return }

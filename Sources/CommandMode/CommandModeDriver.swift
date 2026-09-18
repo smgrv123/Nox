@@ -199,10 +199,3 @@ public final class CommandModeDriver: VoiceSessionDriver {
         VoiceSessionResult(transcript: "", summary: summary)
     }
 }
-
-/// Default `appCatalog` conformer for callers that don't bias transcription toward
-/// installed-app names (e.g. existing test helpers). Always empty.
-public struct EmptyInstalledApplicationCatalog: InstalledApplicationCatalog {
-    public init() {}
-    public func installedApplications() async -> [InstalledApplication] { [] }
-}

@@ -182,6 +182,14 @@ struct FakeInstalledApplicationCatalog: InstalledApplicationCatalog {
     }
 }
 
+/// Default `appCatalog` conformer for callers that don't bias transcription toward
+/// installed-app names. Always empty. Moved from `CommandModeDriver.swift`: it lost its
+/// last production caller when `appCatalog` was replaced by `makeInitialPrompt`, so it
+/// now lives with the test helper that still uses it.
+struct EmptyInstalledApplicationCatalog: InstalledApplicationCatalog {
+    func installedApplications() async -> [InstalledApplication] { [] }
+}
+
 // MARK: - Pipeline factory (CommandModeDriverTests)
 
 let commandModePCM = PCMBuffer(

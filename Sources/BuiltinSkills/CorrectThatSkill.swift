@@ -1,5 +1,5 @@
+import AideCore
 import CommandDispatcher
-import Personalization
 import SkillManifest
 
 enum CorrectThatSkill {

@@ -1,4 +1,4 @@
-import Personalization
+import AideCore
 import SkillManifest
 import XCTest
 
@@ -45,25 +45,6 @@ final class CorrectThatSkillTests: XCTestCase {
             XCTFail("expected missing parameter \(key)")
         } catch SkillExecutionError.missingParameter(let missing) {
             XCTAssertEqual(missing, key)
-        } catch {
-            XCTFail("unexpected error: \(error)")
-        }
-    }
-}
-
-final class BuiltinSkillRouterTests: XCTestCase {
-
-    func testCorrectThatRequiresDictionary() async {
-        do {
-            _ = try await makeRouter().execute(
-                skillID: "correct_that",
-                parameters: objectParams([
-                    "mishearing": .string("alpha"),
-                    "correct_term": .string("beta"),
-                ]))
-            XCTFail("expected dictionaryUnavailable")
-        } catch SkillExecutionError.dictionaryUnavailable {
-            // expected
         } catch {
             XCTFail("unexpected error: \(error)")
         }

@@ -4,9 +4,9 @@ import XCTest
 
 final class DictionaryStoreTests: XCTestCase {
 
-    private var directory: URL!
-    private let fileManager = FileManager.default
-    private let now = ISO8601DateFormatter().date(from: "2026-09-15T10:00:00Z") ?? Date()
+    var directory: URL!
+    let fileManager = FileManager.default
+    let now = ISO8601DateFormatter().date(from: "2026-09-15T10:00:00Z") ?? Date()
 
     override func setUpWithError() throws {
         directory = fileManager.temporaryDirectory
@@ -18,9 +18,9 @@ final class DictionaryStoreTests: XCTestCase {
         try? fileManager.removeItem(at: directory)
     }
 
-    private var fileURL: URL { directory.appending(path: "dictionary.json") }
+    var fileURL: URL { directory.appending(path: "dictionary.json") }
 
-    private func makeStore(config: BudgetConfig = .default) -> DictionaryStore {
+    func makeStore(config: BudgetConfig = .default) -> DictionaryStore {
         let now = self.now
         return DictionaryStore(fileURL: fileURL, clock: { now }, config: config)
     }

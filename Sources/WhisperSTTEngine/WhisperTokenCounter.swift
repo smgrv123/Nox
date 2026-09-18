@@ -1,5 +1,5 @@
 import Foundation
-import Personalization
+import SpeechToText
 import whisper
 
 /// Production ``TokenCounting`` wrapping **`whisper_token_count`** (whisper.h).

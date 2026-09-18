@@ -136,6 +136,7 @@ extension AppCoordinator {
             try? FileManager.default.createDirectory(
                 at: registryDirectory, withIntermediateDirectories: true)
         }
+        let effectiveDictionary = resolveEffectiveDictionary(dictionary)
         let registry = FileSkillRegistry(
             registryDirectory: registryDirectory,
             builtins: BuiltinManifestCatalog.all)
@@ -152,7 +153,7 @@ extension AppCoordinator {
             scanner: DangerousCommandScanner(),
             executor: BuiltinSkillRouter(
                 system: SystemSkillExecutorLive(catalog: installedApps),
-                dictionary: dictionary),
+                dictionary: effectiveDictionary),
             thresholds: .provisional
         )
         let logURL =
@@ -173,6 +174,15 @@ extension AppCoordinator {
         )
     }
 
+    private func resolveEffectiveDictionary(_ dictionary: DictionaryStore?) -> DictionaryStore {
+        if let dictionary {
+            return dictionary
+        }
+        let tempDictionaryFile = FileManager.default.temporaryDirectory.appending(
+            path: "aide-dictionary-\(UUID().uuidString).json")
+        return DictionaryStore(fileURL: tempDictionaryFile)
+    }
+
     private func makeDictionarySubstitutions(
         _ dictionary: DictionaryStore?
     ) -> @Sendable () async -> String {
@@ -186,22 +196,32 @@ extension AppCoordinator {
     /// Shared Whisper `initialPrompt` for Command Mode and Dictation: ranked dictionary
     /// terms first, leftover budget for installed-app names. Tokenizer load failure
     /// falls back to the app-name prompt only — never a char-count fake.
+    ///
+    /// The built prompt is memoized in `cache` (`BiasPromptCache`) against
+    /// `dictionary.generation()` (docs/05-lld.md §4.5D.4), so `engine.withTokenCounter`
+    /// — its O(terms²) `whisper_token_count` greedy fill, serialized on the whisper
+    /// actor — only runs again once the dictionary has actually changed since the last
+    /// build, instead of on every utterance.
     private func makeBiasInitialPrompt(
         engine: WhisperSTTEngine,
         dictionary: DictionaryStore?,
         installedApps: any InstalledApplicationCatalog
     ) -> @Sendable () async -> String? {
-        { [weak self] in
-            let extraPhrases = await Self.appNameBiasPhrases(installedApps)
+        let cache = BiasPromptCache()
+        return { [weak self] in
+            let extraPhrases = await CommandModeDriver.appNameBiasPhrases(installedApps)
             let appNamesOnly = extraPhrases.isEmpty ? nil : extraPhrases.joined(separator: ", ")
             guard let dictionary else { return appNamesOnly }
-            let entries = await dictionary.promotedEntries()
             do {
-                return try await engine.withTokenCounter { counter in
-                    BiasPromptBuilder().build(
-                        promotedEntries: entries,
-                        extraPhrases: extraPhrases,
-                        counter: counter)
+                let generation = await dictionary.generation()
+                return try await cache.value(forGeneration: generation) {
+                    let entries = await dictionary.promotedEntries()
+                    return try await engine.withTokenCounter { counter in
+                        BiasPromptBuilder().build(
+                            promotedEntries: entries,
+                            extraPhrases: extraPhrases,
+                            counter: counter)
+                    }
                 }
             } catch {
                 self?.appLog?.log(
@@ -210,13 +230,6 @@ extension AppCoordinator {
                 return appNamesOnly
             }
         }
-    }
-
-    private static func appNameBiasPhrases(
-        _ catalog: any InstalledApplicationCatalog
-    ) async -> [String] {
-        guard let joined = await CommandModeDriver.appNameBiasPrompt(catalog) else { return [] }
-        return joined.components(separatedBy: ", ")
     }
 
     /// llama-server binds a fresh `:0` port each launch (and after idle-unload), so the

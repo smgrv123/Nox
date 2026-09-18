@@ -12,5 +12,6 @@ final class BudgetConfigTests: XCTestCase {
         XCTAssertEqual(config.recencyHalfLifeDays, 14)
         XCTAssertEqual(config.promoteMin, 2)
         XCTAssertEqual(config.appNameCap, 50)
+        XCTAssertEqual(config.whisperPromptCap, 224)
     }
 }

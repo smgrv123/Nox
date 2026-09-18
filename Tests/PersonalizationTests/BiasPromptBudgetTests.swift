@@ -14,6 +14,19 @@ final class BiasPromptBudgetTests: XCTestCase {
         XCTAssertEqual(filled, ["abcd", "efgh"])
     }
 
+    func testSkipsOverBudgetTermInsteadOfStopping() {
+        // FakeCounter: max(1, count/4). The first term alone is 44 chars → 11 tokens,
+        // which blows the budget on its own; it must be skipped, not treated as a
+        // stopping point, so the shorter term behind it still gets included.
+        let longTerm = String(repeating: "x", count: 44)
+        let filled = BiasPromptBudget.append(
+            [longTerm, "ijkl"],
+            onto: [],
+            counter: FakeCounter(),
+            tokenBudget: 2)
+        XCTAssertEqual(filled, ["ijkl"])
+    }
+
     func testHigherScoreFirst() {
         let now = Date()
         let halfLifeDays = 14.0

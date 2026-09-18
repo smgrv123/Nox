@@ -11,6 +11,10 @@ public struct BudgetConfig: Equatable, Sendable {
     public var recencyHalfLifeDays: Double
     public var promoteMin: Int
     public var appNameCap: Int
+    /// Hard ceiling on the Whisper initial-prompt length, in tokens. Documentation /
+    /// assert-leftover: `tokenBudget` (200 on `.default`) must stay strictly less than
+    /// this cap so the biased prompt never gets truncated mid-term.
+    public var whisperPromptCap: Int
 
     public init(
         hardCap: Int,
@@ -18,7 +22,8 @@ public struct BudgetConfig: Equatable, Sendable {
         substitutionTopN: Int,
         recencyHalfLifeDays: Double,
         promoteMin: Int,
-        appNameCap: Int
+        appNameCap: Int,
+        whisperPromptCap: Int = 224
     ) {
         self.hardCap = hardCap
         self.tokenBudget = tokenBudget
@@ -26,6 +31,7 @@ public struct BudgetConfig: Equatable, Sendable {
         self.recencyHalfLifeDays = recencyHalfLifeDays
         self.promoteMin = promoteMin
         self.appNameCap = appNameCap
+        self.whisperPromptCap = whisperPromptCap
     }
 
     public static let `default` = BudgetConfig(
@@ -34,5 +40,6 @@ public struct BudgetConfig: Equatable, Sendable {
         substitutionTopN: 40,
         recencyHalfLifeDays: 14,
         promoteMin: 2,
-        appNameCap: 50)
+        appNameCap: 50,
+        whisperPromptCap: 224)
 }

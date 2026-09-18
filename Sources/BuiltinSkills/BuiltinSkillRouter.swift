@@ -1,22 +1,23 @@
+import AideCore
 import CommandDispatcher
 import Foundation
-import Personalization
 import SkillManifest
 
 /// Routes a built-in `skillID` to its Swift implementation.
 ///
 /// Pure skills (time, calc, Q&A stubs) run in-process. Effectful skills call
 /// the injected ``SystemSkillExecutor``. `correct_that` needs an injected
-/// ``DictionaryRecording`` (nil outside the composition root / most tests).
+/// ``DictionaryRecording``; the composition root is responsible for handling
+/// its own storage-failure degraded path before constructing this router.
 /// The clock is injectable so time tests can freeze `now`.
 public struct BuiltinSkillRouter: BuiltinSkillExecutor {
     private let system: any SystemSkillExecutor
-    private let dictionary: (any DictionaryRecording)?
+    private let dictionary: any DictionaryRecording
     private let now: @Sendable () -> Date
 
     public init(
         system: any SystemSkillExecutor,
-        dictionary: (any DictionaryRecording)? = nil,
+        dictionary: any DictionaryRecording,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.system = system
@@ -64,9 +65,6 @@ public struct BuiltinSkillRouter: BuiltinSkillExecutor {
         case "take_screenshot":
             return try await TakeScreenshotSkill.run(parameters: parameters, system: system)
         case "correct_that":
-            guard let dictionary else {
-                throw SkillExecutionError.dictionaryUnavailable
-            }
             return try await CorrectThatSkill.run(parameters: parameters, dictionary: dictionary)
         default:
             throw SkillExecutionError.unknownSkill(skillID)

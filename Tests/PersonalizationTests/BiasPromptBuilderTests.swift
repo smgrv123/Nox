@@ -60,13 +60,27 @@ final class BiasPromptBuilderTests: XCTestCase {
         XCTAssertEqual(prompt, "Alpha, Beta, Gamma, Ghostty, Safari")
     }
 
-    private func entry(term: String, lastUsed: Date) -> DictionaryEntry {
+    func testUnpromotedEntriesAreFiltered() {
+        let now = Date()
+        let prompt = BiasPromptBuilder().build(
+            promotedEntries: [
+                entry(term: "Kubernetes", lastUsed: now),
+                entry(term: "Zephyr", lastUsed: now, promoted: false),
+            ],
+            extraPhrases: [],
+            counter: FakeCounter(),
+            now: now)
+        XCTAssertEqual(prompt, "Kubernetes")
+        XCTAssertFalse((prompt ?? "").contains("Zephyr"))
+    }
+
+    private func entry(term: String, lastUsed: Date, promoted: Bool = true) -> DictionaryEntry {
         DictionaryEntry(
             id: term,
             correctTerm: term,
             mishearings: [],
             occurrenceCount: 1,
-            promoted: true,
+            promoted: promoted,
             source: .explicit,
             createdAt: lastUsed,
             lastUsedAt: lastUsed)

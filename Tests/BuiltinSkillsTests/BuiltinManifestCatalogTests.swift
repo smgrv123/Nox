@@ -82,7 +82,7 @@ final class BuiltinManifestCatalogTests: XCTestCase {
         ),
     ]
 
-    func testCatalogContainsExactlyTenManifests() {
+    func testCatalogContainsExactlyElevenManifests() {
         XCTAssertEqual(BuiltinManifestCatalog.all.count, 11)
         let ids = Set(BuiltinManifestCatalog.all.map(\.id))
         XCTAssertEqual(ids, Set(expectedCatalog.keys))

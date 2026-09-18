@@ -178,7 +178,7 @@ let package = Package(
         // integration check (`WhisperSTTEngineTests`), which skips without a placed model.
         .target(
             name: "WhisperSTTEngine",
-            dependencies: ["SpeechToText", "Personalization", "whisper"]
+            dependencies: ["SpeechToText", "whisper"]
         ),
         // P2a · the real `VoiceSessionDriver` conformer (specs/P2a §"Effectful shells"):
         // orchestrates capture → decode → Pre-Gate on `begin`/`end`. Depends only on the
@@ -235,7 +235,7 @@ let package = Package(
         // `SystemSkillExecutor` so the App layer injects NSWorkspace / notifications.
         .target(
             name: "BuiltinSkills",
-            dependencies: ["AideCore", "CommandDispatcher", "Personalization", "SkillManifest"]
+            dependencies: ["AideCore", "CommandDispatcher", "SkillManifest"]
         ),
         // P4 Phase 7 · Command Mode driver + calibration JSONL logger. Depends on
         // seams (STTEngine, Routing, Dispatching) and Persistence.FileAppender —
@@ -268,7 +268,7 @@ let package = Package(
         // pull values *from* the store via App/DictationDriver closures.
         .target(
             name: "Personalization",
-            dependencies: ["Persistence"]
+            dependencies: ["Persistence", "AideCore", "SpeechToText"]
         ),
         // P2b Phase 4 · the pure LLM-runtime heart, playing the role `SpeechToText`
         // played for P2a: `LlmTierPolicy` (Tier → Qwen `ModelDescriptor`) today; the
@@ -411,7 +411,6 @@ let package = Package(
                 "CommandDispatcher",
                 "SkillManifest",
                 "AideCore",
-                "Personalization",
             ],
             resources: [.copy("Fixtures")]
         ),
@@ -442,7 +441,7 @@ let package = Package(
         ),
         .testTarget(
             name: "PersonalizationTests",
-            dependencies: ["Personalization"]
+            dependencies: ["Personalization", "SpeechToText"]
         ),
     ]
 )

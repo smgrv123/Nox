@@ -1,3 +1,4 @@
+import AideCore
 import Foundation
 import Persistence
 
@@ -20,6 +21,14 @@ public actor DictionaryStore {
 
     private var document: DictionaryDocument
     private var didLoad = false
+
+    /// Process-local, in-memory only (never persisted to `dictionary.json` — this is
+    /// cache-invalidation state, not schema). Bumped inside `persist(mutate:)` so every
+    /// mutating method gets it for free; reads (`allEntries`, `promotedEntries`, `load`)
+    /// never touch it. Lets callers such as the Whisper bias-prompt cache
+    /// (`BiasPromptCache`, docs/05-lld.md §4.5D.4) recompute lazily and invalidate only
+    /// on an actual dictionary change.
+    private var generationCounter = 0
 
     public init(
         fileURL: URL,
@@ -60,15 +69,13 @@ public actor DictionaryStore {
         }
         let now = clock()
         try persist { document in
-            if let index = document.entries.firstIndex(where: {
-                $0.correctTerm.caseInsensitiveCompare(pair.correctTerm) == .orderedSame
-            }) {
-                document.entries[index] = document.entries[index].merging(
-                    mishearing: pair.mishearing,
-                    source: source,
-                    lastUsedAt: now)
-            } else {
-                document.entries.append(
+            upsertByCorrectTerm(
+                pair.correctTerm,
+                in: &document,
+                ifFound: { entry in
+                    entry = entry.merging(mishearing: pair.mishearing, source: source, lastUsedAt: now)
+                },
+                ifNotFound: {
                     DictionaryEntry(
                         id: makeID(),
                         correctTerm: pair.correctTerm,
@@ -77,8 +84,8 @@ public actor DictionaryStore {
                         promoted: false,
                         source: source,
                         createdAt: now,
-                        lastUsedAt: now))
-            }
+                        lastUsedAt: now)
+                })
         }
     }
 
@@ -113,12 +120,15 @@ public actor DictionaryStore {
             guard !term.isEmpty else { throw DictionaryStoreError.invalidTermPair }
             let now = clock()
             try persist { document in
-                if let index = document.entries.firstIndex(where: {
-                    $0.correctTerm.caseInsensitiveCompare(term) == .orderedSame
-                }) {
-                    document.entries[index].lastUsedAt = now
-                } else {
-                    document.entries.append(
+                upsertByCorrectTerm(
+                    term,
+                    in: &document,
+                    ifFound: { entry in
+                        entry.occurrenceCount += 1
+                        entry.lastUsedAt = now
+                        entry.source = .explicit
+                    },
+                    ifNotFound: {
                         DictionaryEntry(
                             id: makeID(),
                             correctTerm: term,
@@ -127,8 +137,8 @@ public actor DictionaryStore {
                             promoted: false,
                             source: .explicit,
                             createdAt: now,
-                            lastUsedAt: now))
-                }
+                            lastUsedAt: now)
+                    })
             }
             return
         }
@@ -145,19 +155,43 @@ public actor DictionaryStore {
         return document.entries.filter(\.promoted)
     }
 
+    /// Current generation: incremented once per successful `persist(mutate:)` call
+    /// (i.e. once per `record`/`addExplicit`/`remove`/`upsert`/`replaceAll`). Stable
+    /// across reads.
+    public func generation() -> Int {
+        generationCounter
+    }
+
     private func persist(mutate: (inout DictionaryDocument) -> Void) throws {
         ensureLoaded()
         mutate(&document)
         document.schemaVersion = DictionaryDocument.currentSchemaVersion
-        document.hardCap = config.hardCap
         document.entries = document.entries.map { PromotionPolicy.withPromotion($0, promoteMin: config.promoteMin) }
-        document.entries = MRUEviction.evict(document.entries, cap: config.hardCap)
+        document.entries = MRUEviction.evict(document.entries, cap: document.hardCap)
+        generationCounter += 1
         try writer.write(try DictionaryCodec.encode(document), to: fileURL)
     }
 
     private func ensureLoaded() {
         if !didLoad {
             load()
+        }
+    }
+
+    /// Finds the entry whose `correctTerm` matches `term` case-insensitively and
+    /// mutates it in place, or appends a freshly built entry when none matches.
+    private func upsertByCorrectTerm(
+        _ term: String,
+        in document: inout DictionaryDocument,
+        ifFound mutate: (inout DictionaryEntry) -> Void,
+        ifNotFound makeNew: () -> DictionaryEntry
+    ) {
+        if let index = document.entries.firstIndex(where: {
+            $0.correctTerm.caseInsensitiveCompare(term) == .orderedSame
+        }) {
+            mutate(&document.entries[index])
+        } else {
+            document.entries.append(makeNew())
         }
     }
 }

@@ -1,6 +1,6 @@
+import AideCore
 import CommandDispatcher
 import Foundation
-import Personalization
 import SkillManifest
 import XCTest
 
@@ -55,6 +55,8 @@ final class MockSystemSkillExecutor: SystemSkillExecutor, @unchecked Sendable {
     }
 }
 
+/// Records the `(mishearing, correctTerm)` pairs passed to
+/// `DictionaryRecording.record` so tests can assert on them.
 final class RecordingSpy: DictionaryRecording, @unchecked Sendable {
     private(set) var records: [(mishearing: String, correctTerm: String)] = []
 
@@ -67,7 +69,7 @@ final class RecordingSpy: DictionaryRecording, @unchecked Sendable {
 
 func makeRouter(
     system: MockSystemSkillExecutor = MockSystemSkillExecutor(),
-    dictionary: (any DictionaryRecording)? = nil,
+    dictionary: any DictionaryRecording = RecordingSpy(),
     now: @escaping @Sendable () -> Date = { Date() }
 ) -> BuiltinSkillRouter {
     BuiltinSkillRouter(system: system, dictionary: dictionary, now: now)

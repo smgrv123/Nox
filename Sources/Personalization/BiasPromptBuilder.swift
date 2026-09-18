@@ -1,4 +1,5 @@
 import Foundation
+import SpeechToText
 
 /// Builds the merged Whisper `initialPrompt`: ranked dictionary `correct_term`s first,
 /// then leftover-budget extra phrases (installed app names), joined with `", "`.
@@ -14,7 +15,7 @@ public struct BiasPromptBuilder: Sendable {
         now: Date = Date()
     ) -> String? {
         let dictionaryTerms = BiasPromptBudget.rankedCorrectTerms(
-            promotedEntries,
+            promotedEntries.filter(\.promoted),
             now: now,
             halfLifeDays: config.recencyHalfLifeDays)
         let afterDictionary = BiasPromptBudget.append(

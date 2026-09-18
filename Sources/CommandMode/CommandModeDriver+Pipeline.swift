@@ -119,14 +119,22 @@ extension CommandModeDriver {
     /// Installed-app display names for Whisper's `initialPrompt` slot, capped at 50,
     /// alphabetical, system utilities excluded. The P5b composition root merges this
     /// with dictionary terms; Command Mode no longer calls it from `resolve` directly.
-    public static func appNameBiasPrompt(_ appCatalog: any InstalledApplicationCatalog) async -> String? {
-        let names =
-            await appCatalog.installedApplications()
+    /// Returned unsplit — a display name containing `", "` must not be mistaken for a
+    /// separator by any caller, which is why the joined `appNameBiasPrompt` below is
+    /// derived from this array rather than the other way around.
+    public static func appNameBiasPhrases(_ appCatalog: any InstalledApplicationCatalog) async -> [String] {
+        await appCatalog.installedApplications()
             .filter { !$0.isSystemUtility }
             .map(\.displayName)
             .sorted()
             .prefix(50)
-        let prompt = names.joined(separator: ", ")
+            .map { $0 }
+    }
+
+    /// Joined form of `appNameBiasPhrases`, for callers that only need a single prompt
+    /// string (e.g. `TestSupport`'s default `makeInitialPrompt`).
+    static func appNameBiasPrompt(_ appCatalog: any InstalledApplicationCatalog) async -> String? {
+        let prompt = await appNameBiasPhrases(appCatalog).joined(separator: ", ")
         return prompt.isEmpty ? nil : prompt
     }
 
